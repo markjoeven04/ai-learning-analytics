@@ -24,7 +24,7 @@ function NewSetForm({ onCreated, notify }) {
   const [opts, setOpts] = useState(null);
   const [name, setName] = useState("");
   const [courseIds, setCourseIds] = useState([]);
-  const [size, setSize] = useState(306);
+  const [size, setSize] = useState(50);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ function NewSetForm({ onCreated, notify }) {
       <form onSubmit={submit} className="space-y-3">
         <div>
           <h2 className="text-sm font-semibold text-gray-800">New validation set</h2>
-          <p className="text-xs text-gray-500">A stratified random sample of AI-mapped items (by course and by confidence band). 306 items estimate 85% accuracy within ±4% at 95% confidence.</p>
+          <p className="text-xs text-gray-500">A stratified random sample of AI-mapped items (by course and by confidence band). The capstone protocol uses 50 items, each labeled by three faculty experts; the result is reported with its 95% confidence interval.</p>
         </div>
         <div className="grid sm:grid-cols-3 gap-3">
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Name, e.g. 1st Sem pilot validation"
@@ -91,7 +91,8 @@ function NewSetForm({ onCreated, notify }) {
 
 function AssignRow({ set, course, people, onSaved, notify }) {
   const [form, setForm] = useState({
-    validator_a_id: course.validator_a.id || "", validator_b_id: course.validator_b.id || "", adjudicator_id: course.adjudicator.id || "",
+    validator_a_id: course.validator_a.id || "", validator_b_id: course.validator_b.id || "",
+    validator_c_id: course.validator_c?.id || "", adjudicator_id: course.adjudicator.id || "",
   });
   const [busy, setBusy] = useState(false);
   const save = async () => {
@@ -116,7 +117,8 @@ function AssignRow({ set, course, people, onSaved, notify }) {
     <div className="flex items-center gap-2 flex-wrap mt-2">
       <span className="text-xs text-gray-500">A</span>{sel("validator_a_id", people.validators)}
       <span className="text-xs text-gray-500">B</span>{sel("validator_b_id", people.validators)}
-      <span className="text-xs text-gray-500">Adjudicator</span>{sel("adjudicator_id", people.adjudicators)}
+      <span className="text-xs text-gray-500">C</span>{sel("validator_c_id", people.validators)}
+      <span className="text-xs text-gray-500">Program Chair (tie-breaker)</span>{sel("adjudicator_id", people.adjudicators)}
       <button onClick={save} disabled={busy} className="text-xs px-3 py-1 rounded-lg bg-indigo-600 text-white disabled:opacity-50">
         {busy ? "Saving…" : "Save"}
       </button>
@@ -152,13 +154,14 @@ function SetCard({ set, people, onOpen, onChanged, notify, canDelete }) {
               <div className="flex items-center gap-2">
                 {c.my_role === "validator" && <button onClick={() => onOpen("label", set, c)} className="text-xs px-3 py-1 rounded-lg bg-indigo-600 text-white">Label items</button>}
                 {(c.my_role === "adjudicator" || (set.can_manage && c.awaiting_adjudication > 0)) && c.awaiting_adjudication > 0 &&
-                  <button onClick={() => onOpen("adjudicate", set)} className="text-xs px-3 py-1 rounded-lg bg-amber-500 text-white">Adjudicate ({c.awaiting_adjudication})</button>}
+                  <button onClick={() => onOpen("adjudicate", set)} className="text-xs px-3 py-1 rounded-lg bg-amber-500 text-white">Break ties ({c.awaiting_adjudication})</button>}
               </div>
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
               Validator A: {c.validator_a.name || <em className="text-red-500">unassigned</em>} ({c.validator_a.labeled}/{c.items}) ·
               Validator B: {c.validator_b.name || <em className="text-red-500">unassigned</em>} ({c.validator_b.labeled}/{c.items}) ·
-              Adjudicator: {c.adjudicator.name || <em className="text-red-500">unassigned</em>}
+              Validator C: {c.validator_c?.name || <em className="text-red-500">unassigned</em>} ({c.validator_c?.labeled ?? 0}/{c.items}) ·
+              Program Chair: {c.adjudicator.name || <em className="text-red-500">unassigned</em>}
             </p>
             {editing && people && <AssignRow set={set} course={c} people={people} notify={notify} onSaved={s => onChanged(s)} />}
           </div>
@@ -299,13 +302,13 @@ function AdjudicateView({ set, onBack }) {
       {data?.courses.map(c => (
         <Card key={c.course_id}>
           <h2 className="text-sm font-semibold text-gray-800">{c.course}</h2>
-          <p className="text-xs text-gray-500 mb-3">Items the two validators labeled differently. The AI's answer stays hidden; decide from the question and the syllabus.</p>
-          {c.items.length === 0 ? <p className="text-sm text-gray-400">No disagreements.</p> : c.items.map(it => {
+          <p className="text-xs text-gray-500 mb-3">Items where the validators reached no majority. As Program Chair, break the tie; the AI's answer stays hidden, so decide from the question and the syllabus.</p>
+          {c.items.length === 0 ? <p className="text-sm text-gray-400">No ties to break.</p> : c.items.map(it => {
             const d = drafts[it.id] || { choice: it.decision ? (it.decision.none_fits ? "none" : it.decision.competency_id) : "", note: it.note || "" };
             return (
               <div key={it.id} className="border border-gray-200 rounded-lg p-3 mb-2">
                 <p className="text-sm text-gray-800">{it.question_text}</p>
-                <p className="text-xs text-gray-500 mt-1">Validator A: <strong>{it.label_a.label}</strong> · Validator B: <strong>{it.label_b.label}</strong></p>
+                <p className="text-xs text-gray-500 mt-1">{it.labels.map((l, k) => <span key={k}>{k > 0 && " · "}Validator {"ABC"[k]}: <strong>{l.label}</strong></span>)}</p>
                 <div className="flex items-center gap-2 flex-wrap mt-2">
                   <select value={d.choice} onChange={e => setDrafts(x => ({ ...x, [it.id]: { ...d, choice: e.target.value } }))}
                     className="border border-gray-300 rounded-lg px-2 py-1 text-sm max-w-md">
@@ -350,7 +353,8 @@ function ResultsView({ set, onBack }) {
       </div>
       <Card>
         <h2 className="text-sm font-semibold text-gray-800">{data.name}</h2>
-        <p className="text-xs text-gray-500">{m.ground_truth_items} of {m.items} items have ground truth{m.complete ? " (complete)" : ""} · {m.awaiting_adjudication} awaiting adjudication</p>
+        <p className="text-xs text-gray-500">{m.ground_truth_items} of {m.items} items have ground truth{m.complete ? " (complete)" : ""} · {m.awaiting_adjudication} awaiting the Program Chair
+          {m.decisions && <> · ground truth: {m.decisions.unanimous} unanimous, {m.decisions.majority} majority, {m.decisions.program_chair} Program Chair</>}</p>
         <div className="grid sm:grid-cols-4 gap-3 mt-4 text-center">
           <div className="bg-gray-50 rounded-lg p-3">
             <p className={`text-2xl font-bold ${m.accuracy_pct == null ? "text-gray-400" : m.meets_target ? "text-emerald-600" : "text-amber-600"}`}>{pct(m.accuracy_pct)}</p>
@@ -359,11 +363,11 @@ function ResultsView({ set, onBack }) {
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
             <p className="text-2xl font-bold text-gray-800">{m.kappa == null ? "—" : m.kappa.toFixed(2)}</p>
-            <p className="text-xs text-gray-500">Cohen's κ between validators (target ≥ 0.61)</p>
+            <p className="text-xs text-gray-500">{m.kappa_method === "Fleiss" ? "Fleiss'" : "Cohen's"} κ between validators (target ≥ 0.61)</p>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
             <p className="text-2xl font-bold text-gray-800">{pct(m.agreement_pct)}</p>
-            <p className="text-xs text-gray-500">validators agreed before adjudication</p>
+            <p className="text-xs text-gray-500">validators unanimous before tie-breaks</p>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
             <p className="text-2xl font-bold text-gray-800">{m.correct}/{m.ground_truth_items}</p>
@@ -438,7 +442,7 @@ export default function MappingValidationPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-800">Mapping Validation</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Faculty-validated ground truth for the AI's question-to-competency mapping. Two validators per course label a random sample blind; the Program Director settles disagreements; the AI is scored against the result.
+            Faculty-validated ground truth for the AI's question-to-competency mapping. Three faculty experts per course label a random sample blind; the majority label is the ground truth and the Program Chair breaks ties. The AI is scored against it, never against its own confidence, and items it got wrong go back to the faculty review queue.
           </p>
         </div>
         <Toast toast={toast} />

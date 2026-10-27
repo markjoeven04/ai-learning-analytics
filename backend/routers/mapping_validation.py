@@ -4,9 +4,13 @@ AI's question-to-competency mapping and score the AI against it.
 Roles
   * Managers (create sets, assign people, see results): administrators and Program
     Directors for their college's courses; Deans and the VPAA can view results.
-  * Validators: label their course's sampled items blind — the AI's answer and
-    confidence are never sent to them, nor the other validator's labels.
-  * Adjudicator (usually the Program Director): resolves items the validators disagree on.
+  * Validators (two or three faculty experts): label their course's sampled items blind —
+    the AI's answer and confidence are never sent to them, nor the other validators' labels.
+  * Program Chair (the adjudicator, usually the Program Director): breaks ties when the
+    validators reach no majority.
+
+Ground truth is the majority label. Once it is settled, an item whose AI answer differs
+from it is sent back to the faculty review queue (HITL) for that assessment.
 """
 import random
 import uuid
@@ -32,7 +36,8 @@ from backend.models.syllabus import Competency, Syllabus, SyllabusStatus
 from backend.models.user import User, UserRole
 from backend.services.institution_settings import get_settings
 from backend.services.mapping_validation import (
-    DEFAULT_SAMPLE_SIZE, NONE, compute_metrics, draw_sample, eligible_items, ground_truth, label_key,
+    DEFAULT_SAMPLE_SIZE, NONE, compute_metrics, decision, draw_sample, eligible_items, ground_truth, label_key,
+    needs_tie_break, voters, votes,
 )
 
 router = APIRouter(prefix="/mapping-validation", tags=["mapping-validation"])
@@ -52,6 +57,7 @@ class SetCreate(BaseModel):
 class AssignmentIn(BaseModel):
     validator_a_id: uuid.UUID | None = None
     validator_b_id: uuid.UUID | None = None
+    validator_c_id: uuid.UUID | None = None
     adjudicator_id: uuid.UUID | None = None
 
 
@@ -124,6 +130,28 @@ def _label_out(key: str | None, names: dict) -> dict | None:
     return {"competency_id": key, "none_fits": False, "label": f"{code} · {topic}"}
 
 
+def _is_validator(a, user) -> bool:
+    return str(user.id) in {str(v) for v in voters(a)}
+
+
+def _involved(s, user) -> bool:
+    return any(_is_validator(a, user) or str(user.id) == str(a.adjudicator_id) for a in s.assignments)
+
+
+def _route_to_review(item: MappingValidationItem, a, db: Session) -> bool:
+    """Send an item back to faculty review (HITL) when its settled ground truth differs from
+    the AI's answer and the live mapping hasn't already been corrected to it. Low-confidence
+    items are routed at mapping time (assessments router)."""
+    gt = ground_truth(item, voters(a))
+    if gt is None or gt == label_key(item.ai_competency_id, item.ai_competency_id is None):
+        return False
+    live = db.get(AssessmentItem, item.assessment_item_id)
+    if live is None or label_key(live.mapped_competency_id, False) == gt:
+        return False
+    live.needs_review, live.validated_by = True, None
+    return True
+
+
 def _user_name(uid, db):
     u = db.get(User, uid) if uid else None
     return u.full_name if u else None
@@ -142,9 +170,7 @@ def _summary(s: MappingValidationSet, db: Session, user: User, with_metrics: boo
         course = db.get(Course, a.course_id)
         items = [i for i in s.items if str(i.course_id) == course_id]
         done = lambda vid: sum(1 for i in items if any(str(l.validator_id) == str(vid) for l in i.labels)) if vid else 0
-        disagree = [i for i in items if ground_truth(i, a.validator_a_id, a.validator_b_id) is None
-                    and len({label_key(l.competency_id, l.none_fits) for l in i.labels
-                             if str(l.validator_id) in (str(a.validator_a_id), str(a.validator_b_id))}) == 2]
+        disagree = [i for i in items if needs_tie_break(i, voters(a)) and i.adjudication is None]
         out["courses"].append({
             "course_id": course_id,
             "course": f"{course.code} — {course.title}" if course else course_id,
@@ -153,10 +179,12 @@ def _summary(s: MappingValidationSet, db: Session, user: User, with_metrics: boo
                             "name": _user_name(a.validator_a_id, db), "labeled": done(a.validator_a_id)},
             "validator_b": {"id": str(a.validator_b_id) if a.validator_b_id else None,
                             "name": _user_name(a.validator_b_id, db), "labeled": done(a.validator_b_id)},
+            "validator_c": {"id": str(a.validator_c_id) if a.validator_c_id else None,
+                            "name": _user_name(a.validator_c_id, db), "labeled": done(a.validator_c_id)},
             "adjudicator": {"id": str(a.adjudicator_id) if a.adjudicator_id else None,
                             "name": _user_name(a.adjudicator_id, db)},
             "awaiting_adjudication": len(disagree),
-            "my_role": ("validator" if str(user.id) in (str(a.validator_a_id), str(a.validator_b_id)) else
+            "my_role": ("validator" if _is_validator(a, user) else
                         "adjudicator" if str(user.id) == str(a.adjudicator_id) else None),
         })
     if with_metrics:
@@ -237,9 +265,7 @@ def list_sets(db: Session = Depends(get_db), user: User = Depends(get_current_us
     out = []
     for s in sets:
         s = _get_set(s.id, db)
-        involved = any(str(user.id) in (str(a.validator_a_id), str(a.validator_b_id), str(a.adjudicator_id))
-                       for a in s.assignments)
-        if involved or _can_view(s, user, db):
+        if _involved(s, user) or _can_view(s, user, db):
             out.append(_summary(s, db, user, with_metrics=False))
     return out
 
@@ -248,9 +274,7 @@ def list_sets(db: Session = Depends(get_db), user: User = Depends(get_current_us
 def get_set(set_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     s = _get_set(set_id, db)
     viewer = _can_view(s, user, db)
-    involved = any(str(user.id) in (str(a.validator_a_id), str(a.validator_b_id), str(a.adjudicator_id))
-                   for a in s.assignments)
-    if not (viewer or involved):
+    if not (viewer or _involved(s, user)):
         raise HTTPException(status_code=403, detail="Not part of this validation set")
     return _summary(s, db, user, with_metrics=viewer)
 
@@ -264,12 +288,14 @@ def assign(set_id: uuid.UUID, course_id: uuid.UUID, payload: AssignmentIn,
     a = next((a for a in s.assignments if str(a.course_id) == str(course_id)), None)
     if not a:
         raise HTTPException(status_code=404, detail="Course is not part of this set")
-    if payload.validator_a_id and payload.validator_a_id == payload.validator_b_id:
-        raise HTTPException(status_code=422, detail="The two validators must be different people")
-    if payload.adjudicator_id and payload.adjudicator_id in (payload.validator_a_id, payload.validator_b_id):
-        raise HTTPException(status_code=422, detail="The adjudicator cannot also be a validator")
+    picked = [v for v in (payload.validator_a_id, payload.validator_b_id, payload.validator_c_id) if v]
+    if len(picked) != len(set(picked)):
+        raise HTTPException(status_code=422, detail="The validators must be different people")
+    if payload.adjudicator_id and payload.adjudicator_id in picked:
+        raise HTTPException(status_code=422, detail="The Program Chair cannot also be a validator")
     roles = {"validator_a_id": (UserRole.instructor, UserRole.program_director),
              "validator_b_id": (UserRole.instructor, UserRole.program_director),
+             "validator_c_id": (UserRole.instructor, UserRole.program_director),
              "adjudicator_id": (UserRole.program_director, UserRole.dean, UserRole.admin)}
     newly = []
     for field, allowed in roles.items():
@@ -289,7 +315,7 @@ def assign(set_id: uuid.UUID, course_id: uuid.UUID, payload: AssignmentIn,
         setattr(a, field, uid)
     course = db.get(Course, a.course_id)
     for uid, field in newly:
-        role = "adjudicate disagreements" if field == "adjudicator_id" else "label items blind"
+        role = "break ties as Program Chair" if field == "adjudicator_id" else "label items blind"
         notify(db, str(uid), "validation_assigned", "Mapping validation assignment",
                f"You were asked to {role} for {course.code} in the validation set \"{s.name}\". "
                "Open Mapping Validation to start.", related_id=str(s.id))
@@ -314,7 +340,7 @@ def delete_set(set_id: uuid.UUID, db: Session = Depends(get_db), user: User = De
 
 def _assignment_for_validator(s, course_id, user):
     a = next((a for a in s.assignments if str(a.course_id) == str(course_id)), None)
-    if not a or str(user.id) not in (str(a.validator_a_id), str(a.validator_b_id)):
+    if not a or not _is_validator(a, user):
         raise HTTPException(status_code=403, detail="You are not a validator for this course")
     return a
 
@@ -323,7 +349,7 @@ def _assignment_for_validator(s, course_id, user):
 def labeling_queue(set_id: uuid.UUID, course_id: uuid.UUID, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
     """The validator's items for one course. Deliberately excludes the AI's answer,
-    its confidence and the other validator's labels."""
+    its confidence and the other validators' labels."""
     s = _get_set(set_id, db)
     _assignment_for_validator(s, course_id, user)
     items = sorted((i for i in s.items if str(i.course_id) == str(course_id)), key=lambda i: i.position)
@@ -351,7 +377,7 @@ def save_label(set_id: uuid.UUID, item_id: uuid.UUID, payload: LabelIn, db: Sess
     item = next((i for i in s.items if str(i.id) == str(item_id)), None)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found in this set")
-    _assignment_for_validator(s, item.course_id, user)
+    a = _assignment_for_validator(s, item.course_id, user)
     if item.adjudication is not None:
         raise HTTPException(status_code=409, detail="This item has been adjudicated; labels are final")
     if not payload.none_fits:
@@ -367,6 +393,9 @@ def save_label(set_id: uuid.UUID, item_id: uuid.UUID, payload: LabelIn, db: Sess
     label.none_fits = payload.none_fits
     label.labeled_at = datetime.now(timezone.utc)
     db.commit()
+    db.refresh(item)
+    _route_to_review(item, a, db)
+    db.commit()
     return {"item_id": str(item.id), "label": label_key(label.competency_id, label.none_fits)}
 
 
@@ -374,7 +403,7 @@ def save_label(set_id: uuid.UUID, item_id: uuid.UUID, payload: LabelIn, db: Sess
 
 @router.get("/{set_id}/adjudication")
 def adjudication_queue(set_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Items where both validators answered differently, for courses this user adjudicates.
+    """Items with no majority among the validators, for courses this user chairs.
     The AI's answer is still hidden so the decision is about the question alone."""
     s = _get_set(set_id, db)
     courses = [a for a in s.assignments
@@ -388,13 +417,11 @@ def adjudication_queue(set_id: uuid.UUID, db: Session = Depends(get_db), user: U
         course = db.get(Course, a.course_id)
         rows = []
         for i in sorted((i for i in s.items if str(i.course_id) == str(a.course_id)), key=lambda i: i.position):
-            labels = {str(l.validator_id): label_key(l.competency_id, l.none_fits) for l in i.labels}
-            la, lb = labels.get(str(a.validator_a_id)), labels.get(str(a.validator_b_id))
-            if la is None or lb is None or la == lb:
+            if not needs_tie_break(i, voters(a)):
                 continue
             adj = i.adjudication
             rows.append({"id": str(i.id), "question_text": i.question_text,
-                         "label_a": _label_out(la, names), "label_b": _label_out(lb, names),
+                         "labels": [_label_out(v, names) for v in votes(i, voters(a))],
                          "decision": _label_out(label_key(adj.competency_id, adj.none_fits), names) if adj else None,
                          "note": adj.note if adj else None})
         out.append({"course_id": str(a.course_id), "course": f"{course.code} — {course.title}" if course else "",
@@ -412,10 +439,8 @@ def adjudicate(set_id: uuid.UUID, item_id: uuid.UUID, payload: LabelIn, db: Sess
     a = next((a for a in s.assignments if str(a.course_id) == str(item.course_id)), None)
     if not a or (str(a.adjudicator_id) != str(user.id) and user.role != UserRole.admin):
         raise HTTPException(status_code=403, detail="You are not the adjudicator for this course")
-    labels = {str(l.validator_id): label_key(l.competency_id, l.none_fits) for l in item.labels}
-    la, lb = labels.get(str(a.validator_a_id)), labels.get(str(a.validator_b_id))
-    if la is None or lb is None or la == lb:
-        raise HTTPException(status_code=409, detail="Only items the two validators disagree on are adjudicated")
+    if not needs_tie_break(item, voters(a)):
+        raise HTTPException(status_code=409, detail="Only items with no majority among the validators need the Program Chair")
     if not payload.none_fits:
         if payload.competency_id is None or str(payload.competency_id) not in {str(c.id) for c in _competencies(item.course_id, db)}:
             raise HTTPException(status_code=422, detail="Choose a competency from the endorsed syllabus or 'no matching competency'")
@@ -427,6 +452,9 @@ def adjudicate(set_id: uuid.UUID, item_id: uuid.UUID, payload: LabelIn, db: Sess
     adj.none_fits = payload.none_fits
     adj.note = (payload.note or "").strip() or None
     adj.decided_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(item)
+    _route_to_review(item, a, db)
     db.commit()
     log_action(db, str(user.id), "adjudicate_mapping_item", target_table="mapping_validation_items",
                target_id=item.id, extra={"decision": label_key(adj.competency_id, adj.none_fits)})
@@ -462,9 +490,12 @@ def export_results(set_id: uuid.UUID, db: Session = Depends(get_db), user: User 
         ("Confidence band boundary", s.review_threshold), ("Items with ground truth", m["ground_truth_items"]),
         ("AI correct", m["correct"]), ("Mapping accuracy %", m["accuracy_pct"]),
         ("95% CI low %", m["ci_low"]), ("95% CI high %", m["ci_high"]), ("Target %", m["target_pct"]),
-        ("Cohen's kappa (validators, before adjudication)", m["kappa"]),
-        ("Validator agreement %", m["agreement_pct"]), ("Disagreements", m["disagreements"]),
-        ("Adjudicated", m["adjudicated"]),
+        (f"{m['kappa_method'] or 'Cohen/Fleiss'} kappa (validators, before tie-breaks)", m["kappa"]),
+        ("Unanimous validator agreement %", m["agreement_pct"]),
+        ("Ground truth: unanimous", m["decisions"]["unanimous"]),
+        ("Ground truth: majority (2 of 3)", m["decisions"]["majority"]),
+        ("Ground truth: Program Chair tie-break", m["decisions"]["program_chair"]),
+        ("No majority (ties)", m["disagreements"]), ("Ties broken", m["adjudicated"]),
         ("High-confidence accuracy %", m["by_band"]["high"]["accuracy_pct"]),
         ("High-confidence items", m["by_band"]["high"]["items"]),
         ("Low-confidence accuracy %", m["by_band"]["low"]["accuracy_pct"]),
@@ -477,7 +508,7 @@ def export_results(set_id: uuid.UUID, db: Session = Depends(get_db), user: User 
 
     items_ws = wb.create_sheet("Items")
     header = ["Course", "Question", "AI competency", "AI confidence", "Band", "Validator A", "Validator B",
-              "Adjudication", "Ground truth", "AI correct"]
+              "Validator C", "Program Chair", "Ground truth", "Decision", "AI correct"]
     items_ws.append(header)
     for cell in items_ws[1]:
         cell.fill, cell.font = head_fill, head_font
@@ -485,16 +516,18 @@ def export_results(set_id: uuid.UUID, db: Session = Depends(get_db), user: User 
                                                else " · ".join(names.get(key, ("?", "?"))))
     for i in sorted(s.items, key=lambda i: (codes.get(str(i.course_id), ""), i.position)):
         a = by_course.get(str(i.course_id))
-        labels = {str(l.validator_id): label_key(l.competency_id, l.none_fits) for l in i.labels}
-        gt = ground_truth(i, a.validator_a_id, a.validator_b_id) if a else None
+        slots = votes(i, (a.validator_a_id, a.validator_b_id, a.validator_c_id)) if a else [None] * 3
+        gt = ground_truth(i, voters(a)) if a else None
+        how = decision(i, voters(a)) if a else None
         ai = label_key(i.ai_competency_id, i.ai_competency_id is None)
         items_ws.append([
             codes.get(str(i.course_id)), i.question_text, lab(ai), i.ai_confidence, i.confidence_band,
-            lab(labels.get(str(a.validator_a_id))) if a else "", lab(labels.get(str(a.validator_b_id))) if a else "",
+            *[lab(v) if a and vid else "" for v, vid in zip(slots, (a.validator_a_id, a.validator_b_id, a.validator_c_id) if a else (None,) * 3)],
             lab(label_key(i.adjudication.competency_id, i.adjudication.none_fits)) if i.adjudication else "",
-            lab(gt), "" if gt is None else ("Yes" if ai == gt else "No"),
+            lab(gt), {"unanimous": "Unanimous", "majority": "Majority", "program_chair": "Program Chair"}.get(how, ""),
+            "" if gt is None else ("Yes" if ai == gt else "No"),
         ])
-    for col, w in zip("ABCDEFGHIJ", (10, 60, 34, 12, 8, 34, 34, 34, 34, 10)):
+    for col, w in zip("ABCDEFGHIJKL", (10, 60, 34, 12, 8, 34, 34, 34, 34, 34, 14, 10)):
         items_ws.column_dimensions[col].width = w
     items_ws.freeze_panes = "A2"
 

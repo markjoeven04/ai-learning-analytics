@@ -3,10 +3,11 @@
 * Sampling — a stratified random sample of AI-mapped assessment items, allocated to
   courses and, within a course, to confidence bands (>= / < the review threshold) in
   proportion to their size. The seed is stored so the sample can be reproduced.
-* Ground truth — the label both validators agree on, otherwise the adjudicator's.
-* Metrics — accuracy (AI answer == ground truth) with a 95% Wilson interval, Cohen's
-  kappa between the two validators before adjudication, accuracy per competency and
-  per confidence band (whether the self-reported confidence separates right from wrong).
+* Ground truth — majority vote of the assigned validators (2 of 3, or both of 2);
+  when there is no majority the Program Chair (adjudicator) breaks the tie.
+* Metrics — accuracy (AI answer == ground truth, never the AI's own confidence) with a
+  95% Wilson interval, inter-rater agreement before tie-breaks (Cohen's kappa for two
+  validators, Fleiss' kappa for three), accuracy per competency and per confidence band.
 """
 import math
 import random
@@ -18,7 +19,7 @@ from backend.models.assessment import Assessment, AssessmentItem
 from backend.models.mapping_validation import MappingValidationItem
 
 NONE = "none"  # label key for "no matching competency"
-DEFAULT_SAMPLE_SIZE = 306  # 85% ± 4% at 95% confidence: 1.96² × 0.85 × 0.15 / 0.04²
+DEFAULT_SAMPLE_SIZE = 50  # capstone protocol: 50 items × 3 experts; report the Wilson CI with it
 
 
 # ── sampling ──────────────────────────────────────────────────────────────────
@@ -94,41 +95,92 @@ def cohens_kappa(pairs: list[tuple]) -> float | None:
     return round((observed - expected) / (1 - expected), 3)
 
 
+def fleiss_kappa(rows: list[tuple]) -> float | None:
+    """Fleiss' kappa for a fixed number of raters per item [(a, b, c), ...]."""
+    n = len(rows)
+    if n == 0:
+        return None
+    m = len(rows[0])
+    p_bar = sum((sum(v * v for v in Counter(r).values()) - m) / (m * (m - 1)) for r in rows) / n
+    totals = Counter(l for r in rows for l in r)
+    p_e = sum((v / (n * m)) ** 2 for v in totals.values())
+    if p_e == 1:
+        return 1.0
+    return round((p_bar - p_e) / (1 - p_e), 3)
+
+
 def label_key(competency_id, none_fits) -> str:
     return NONE if none_fits or competency_id is None else str(competency_id)
 
 
-def ground_truth(item: MappingValidationItem, validator_a, validator_b) -> str | None:
-    """Agreed label, else the adjudication, else None (still open)."""
+def voters(asg) -> list:
+    """The assignment's validators (A, B and the optional C), unassigned slots dropped."""
+    return [v for v in (asg.validator_a_id, asg.validator_b_id, getattr(asg, "validator_c_id", None)) if v]
+
+
+def votes(item: MappingValidationItem, validators) -> list:
+    """Labels given by the assigned validators, in A/B/C order (None = not labeled yet)."""
     labels = {str(l.validator_id): label_key(l.competency_id, l.none_fits) for l in item.labels}
-    a, b = labels.get(str(validator_a)), labels.get(str(validator_b))
-    if a is not None and a == b:
-        return a
+    return [labels.get(str(v)) for v in validators]
+
+
+def majority(item: MappingValidationItem, validators) -> str | None:
+    """The label held by a majority of the validators (at least two), else None."""
+    given = [v for v in votes(item, validators) if v is not None]
+    if not given:
+        return None
+    label, count = Counter(given).most_common(1)[0]
+    return label if count >= max(2, len(validators) // 2 + 1) else None
+
+
+def needs_tie_break(item: MappingValidationItem, validators) -> bool:
+    """Every validator has answered and no label has a majority."""
+    v = votes(item, validators)
+    return len(v) >= 2 and None not in v and majority(item, validators) is None
+
+
+def ground_truth(item: MappingValidationItem, validators) -> str | None:
+    """Majority label, else the Program Chair's tie-break, else None (still open)."""
+    gt = majority(item, validators)
+    if gt is not None:
+        return gt
     if item.adjudication is not None:
         return label_key(item.adjudication.competency_id, item.adjudication.none_fits)
     return None
 
 
+def decision(item: MappingValidationItem, validators) -> str | None:
+    """How the ground truth was reached: unanimous, majority, program_chair."""
+    if majority(item, validators) is not None:
+        v = votes(item, validators)
+        return "unanimous" if None not in v and len(set(v)) == 1 else "majority"
+    return "program_chair" if item.adjudication is not None else None
+
+
 def compute_metrics(items, assignments_by_course: dict, competency_names: dict, target: float = 85.0) -> dict:
     """items: MappingValidationItem with labels/adjudication loaded.
     assignments_by_course: {course_id: assignment}; competency_names: {id: (code, topic)}."""
-    pairs, scored = [], []
-    labeled_a = labeled_b = disagreements = adjudicated = 0
+    full, scored = [], []
+    labeled = [0, 0, 0]
+    disagreements = adjudicated = 0
+    decisions = Counter()
     for it in items:
         asg = assignments_by_course.get(str(it.course_id))
         if asg is None:
             continue
-        labels = {str(l.validator_id): label_key(l.competency_id, l.none_fits) for l in it.labels}
-        a, b = labels.get(str(asg.validator_a_id)), labels.get(str(asg.validator_b_id))
-        labeled_a += a is not None
-        labeled_b += b is not None
-        if a is not None and b is not None:
-            pairs.append((a, b))
-            if a != b:
-                disagreements += 1
-                adjudicated += it.adjudication is not None
-        gt = ground_truth(it, asg.validator_a_id, asg.validator_b_id)
+        slots = (asg.validator_a_id, asg.validator_b_id, getattr(asg, "validator_c_id", None))
+        for k, v in enumerate(votes(it, slots)):
+            labeled[k] += v is not None
+        vs = voters(asg)
+        v = votes(it, vs)
+        if len(v) >= 2 and None not in v:
+            full.append(tuple(v))
+        if needs_tie_break(it, vs):
+            disagreements += 1
+            adjudicated += it.adjudication is not None
+        gt = ground_truth(it, vs)
         if gt is not None:
+            decisions[decision(it, vs)] += 1
             ai = label_key(it.ai_competency_id, it.ai_competency_id is None)
             scored.append((it, gt, ai == gt))
 
@@ -155,12 +207,18 @@ def compute_metrics(items, assignments_by_course: dict, competency_names: dict, 
                               "accuracy_pct": round(ok / n * 100, 1)})
     by_competency.sort(key=lambda r: (r["accuracy_pct"], -r["items"]))
 
+    # Agreement before tie-breaks: Fleiss for three-validator items, Cohen for two.
+    triples = [r for r in full if len(r) == 3]
+    rows = triples or [r for r in full if len(r) == 2]
+    kappa = fleiss_kappa(triples) if triples else cohens_kappa(rows)
+
     total = len(items)
     return {
         "items": total,
-        "labeled_by_both": len(pairs),
-        "labeled_a": labeled_a,
-        "labeled_b": labeled_b,
+        "labeled_by_both": len(full),   # labeled by every assigned validator
+        "labeled_a": labeled[0],
+        "labeled_b": labeled[1],
+        "labeled_c": labeled[2],
         "disagreements": disagreements,
         "adjudicated": adjudicated,
         "awaiting_adjudication": disagreements - adjudicated,
@@ -173,8 +231,10 @@ def compute_metrics(items, assignments_by_course: dict, competency_names: dict, 
         "meets_target": accuracy is not None and accuracy >= target,
         # stricter reading: even the lower end of the 95% interval reaches the target
         "meets_target_at_ci_low": lo is not None and lo >= target,
-        "kappa": cohens_kappa(pairs),
-        "agreement_pct": round(sum(1 for a, b in pairs if a == b) / len(pairs) * 100, 1) if pairs else None,
+        "kappa": kappa,
+        "kappa_method": None if kappa is None else ("Fleiss" if triples else "Cohen"),
+        "agreement_pct": round(sum(1 for r in rows if len(set(r)) == 1) / len(rows) * 100, 1) if rows else None,
+        "decisions": {k: decisions[k] for k in ("unanimous", "majority", "program_chair")},
         "by_band": by_band,
         "by_competency": by_competency,
         "none_fits_ground_truth": sum(1 for _, gt, _ in scored if gt == NONE),

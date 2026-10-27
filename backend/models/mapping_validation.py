@@ -1,9 +1,9 @@
 """Faculty-validated ground truth for AI topic mapping (panel comment 1).
 
 A validation set is a stratified random sample of AI-mapped assessment items. For
-each course in the set two faculty validators label every sampled item blind (they
-never see the AI's answer); a Program Director adjudicates disagreements. The
-agreed or adjudicated label is the ground truth the AI is scored against.
+each course in the set two or three faculty validators label every sampled item blind
+(they never see the AI's answer). The majority label is the ground truth the AI is
+scored against; when there is no majority the Program Chair (adjudicator) breaks the tie.
 """
 import uuid
 
@@ -41,6 +41,7 @@ class MappingValidationAssignment(Base):
     course_id = Column(GUID(), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     validator_a_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     validator_b_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    validator_c_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     adjudicator_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     set = relationship("MappingValidationSet", back_populates="assignments")

@@ -1,6 +1,7 @@
 """
-Mapping validation (panel comment 1): stratified sample, blind two-validator labeling,
-adjudication, and accuracy / kappa / confidence-band metrics.
+Mapping validation (panel comment 1): stratified sample, blind labeling by two or three
+validators, majority-vote ground truth with a Program Chair tie-break, HITL routing, and
+accuracy / kappa / confidence-band metrics.
 """
 import io
 import uuid
@@ -16,7 +17,7 @@ from backend.models.assessment import (
 from backend.models.course import Course
 from backend.models.syllabus import Competency, Syllabus, SyllabusStatus
 from backend.models.user import User, UserRole
-from backend.services.mapping_validation import _allocate, cohens_kappa, draw_sample, wilson_interval
+from backend.services.mapping_validation import _allocate, cohens_kappa, draw_sample, fleiss_kappa, wilson_interval
 
 
 def _auth(user):
@@ -40,6 +41,13 @@ def test_cohens_kappa_known_values():
     pairs = [("y", "y")] * 20 + [("y", "n")] * 5 + [("n", "y")] * 10 + [("n", "n")] * 15
     assert cohens_kappa(pairs) == 0.4
     assert cohens_kappa([]) is None
+
+
+def test_fleiss_kappa_known_values():
+    assert fleiss_kappa([("a", "a", "a"), ("b", "b", "b")]) == 1.0
+    # 2 of 3 agree on every item, labels balanced -> P̄ = 1/3, Pe = 1/2 -> kappa -1/3
+    assert fleiss_kappa([("a", "a", "b"), ("b", "b", "a")]) == -0.333
+    assert fleiss_kappa([]) is None
 
 
 def test_wilson_interval():
@@ -147,7 +155,7 @@ def test_full_validation_flow(client, db, instructor_user, setup):
     adj = client.get(f"/mapping-validation/{set_id}/adjudication", headers=_auth(pd)).json()
     rows = adj["courses"][0]["items"]
     assert len(rows) == 1 and rows[0]["question_text"] == "q2"
-    assert {rows[0]["label_a"]["label"], rows[0]["label_b"]["label"]} == {"DSA-02 · Topic 2", "No matching competency"}
+    assert {l["label"] for l in rows[0]["labels"]} == {"DSA-02 · Topic 2", "No matching competency"}
     assert client.put(f"/mapping-validation/{set_id}/adjudication/items/{rows[0]['id']}", headers=_auth(pd),
                       json={"competency_id": c2, "note": "Matches outcome 2"}).status_code == 200
     # labels are final after adjudication
@@ -195,3 +203,62 @@ def test_report_includes_validation_results(client, db, instructor_user, admin_u
     assert data["mapping_validation"][0]["items"] == 3
     pdf = client.get("/reports/academic-performance/export", params={"format": "pdf"}, headers=_auth(admin_user))
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+
+
+def test_three_validators_majority_and_hitl_routing(client, db, instructor_user, setup):
+    pd, second, course, comps = setup["pd"], setup["second"], setup["course"], setup["comps"]
+    third = _user(db, "third@test.com", UserRole.instructor)
+    s = client.post("/mapping-validation/", headers=_auth(pd),
+                    json={"name": "Capstone protocol", "course_ids": [str(course.id)], "seed": 3}).json()
+    set_id, cid = s["id"], str(course.id)
+    # validators must be three different people, and the Program Chair is none of them
+    body = {"validator_a_id": str(instructor_user.id), "validator_b_id": str(second.id),
+            "validator_c_id": str(second.id), "adjudicator_id": str(pd.id)}
+    assert client.put(f"/mapping-validation/{set_id}/assignments/{cid}", headers=_auth(pd), json=body).status_code == 422
+    body["validator_c_id"] = str(third.id)
+    r = client.put(f"/mapping-validation/{set_id}/assignments/{cid}", headers=_auth(pd), json=body)
+    assert r.status_code == 200 and r.json()["courses"][0]["validator_c"]["id"] == str(third.id)
+
+    q = client.get(f"/mapping-validation/{set_id}/label/{cid}", headers=_auth(third)).json()
+    by_text = {i["question_text"]: i["id"] for i in q["items"]}
+    c1, c2 = str(comps[0].id), str(comps[1].id)
+    lab = lambda user, item, body: client.put(f"/mapping-validation/{set_id}/label/items/{by_text[item]}",
+                                              headers=_auth(user), json=body)
+    live = lambda text: db.query(AssessmentItem).filter(AssessmentItem.question_text == text).one()
+    for text in ("q0", "q1"):  # faculty already confirmed the AI's mapping
+        it = live(text)
+        it.needs_review, it.validated_by = False, instructor_user.id
+    db.commit()
+
+    # q0: unanimous DSA-01 (AI right). q1: 2 of 3 say DSA-02 (AI wrong). q2: three different answers.
+    for u in (instructor_user, second, third):
+        lab(u, "q0", {"competency_id": c1})
+    lab(instructor_user, "q1", {"competency_id": c2})
+    lab(second, "q1", {"competency_id": c1})
+    lab(instructor_user, "q2", {"competency_id": c1})
+    lab(second, "q2", {"competency_id": c2})
+    # A and B differ, C hasn't answered: not a tie yet
+    assert client.get(f"/mapping-validation/{set_id}/adjudication", headers=_auth(pd)).json()["courses"][0]["items"] == []
+    lab(third, "q2", {"none_fits": True})
+    lab(third, "q1", {"competency_id": c2})
+
+    db.expire_all()
+    assert live("q0").needs_review is False                          # AI matched ground truth
+    assert live("q1").needs_review is True and live("q1").validated_by is None   # AI wrong -> HITL
+
+    rows = client.get(f"/mapping-validation/{set_id}/adjudication", headers=_auth(pd)).json()["courses"][0]["items"]
+    assert len(rows) == 1 and rows[0]["question_text"] == "q2" and len(rows[0]["labels"]) == 3
+    assert client.put(f"/mapping-validation/{set_id}/adjudication/items/{rows[0]['id']}", headers=_auth(pd),
+                      json={"competency_id": c1}).status_code == 200
+
+    m = client.get(f"/mapping-validation/{set_id}", headers=_auth(pd)).json()["metrics"]
+    assert m["complete"] and m["correct"] == 1 and m["accuracy_pct"] == 33.3
+    assert m["decisions"] == {"unanimous": 1, "majority": 1, "program_chair": 1}
+    assert m["kappa_method"] == "Fleiss" and m["labeled_c"] == 3
+    db.expire_all()
+    assert live("q2").needs_review is True                            # chair says DSA-01, AI said DSA-02
+
+    x = client.get(f"/mapping-validation/{set_id}/export", headers=_auth(pd))
+    ws = load_workbook(io.BytesIO(x.content))["Items"]
+    assert [c.value for c in ws[1]][5:11] == ["Validator A", "Validator B", "Validator C", "Program Chair",
+                                              "Ground truth", "Decision"]
