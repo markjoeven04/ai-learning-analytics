@@ -21,6 +21,22 @@ function buildError(status, attempts) {
       fields: [],
     };
   }
+  if (status === 422) {
+    return {
+      type: "credentials",
+      title: "Enter a full email address",
+      message: "Use the complete email, e.g. pd.ics@btech.edu.",
+      fields: ["email"],
+    };
+  }
+  if (status === 403) {
+    return {
+      type: "credentials",
+      title: "Account inactive",
+      message: "This account has been deactivated. Contact the administrator.",
+      fields: [],
+    };
+  }
   if (status === 401) {
     const extra =
       attempts >= 3

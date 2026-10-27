@@ -39,7 +39,7 @@ from backend.core.database import SessionLocal
 from backend.core.security import hash_password, hash_student_id
 from backend.models.user import User, UserRole
 from backend.models.course import Course
-from backend.models.syllabus import Syllabus, SyllabusStatus, Competency
+from backend.models.syllabus import ApprovalStage, Syllabus, SyllabusStatus, Competency
 from backend.models.assessment import Assessment, AssessmentItem, AssessmentType, GradingPeriod
 from backend.models.score import StudentScore
 from backend.models.audit import AuditLog
@@ -102,6 +102,10 @@ def get_or_create_user(db, email, defaults):
 # ─── Data definitions ──────────────────────────────────────────────────────────
 
 NEW_INSTRUCTORS = [
+    dict(email="maria.santos@btech.edu", password="Demo@1234",
+         full_name="Prof. Maria Santos", college="ICS"),
+    dict(email="juan.delacruz@btech.edu", password="Demo@1234",
+         full_name="Prof. Juan Dela Cruz", college="ICS"),
     dict(email="prof.ana.santos@btech.edu", password="Demo@1234",
          full_name="Prof. Ana Santos",  college="CBA"),
     dict(email="prof.robert.tan@btech.edu", password="Demo@1234",
@@ -627,6 +631,7 @@ def seed_demo():
                     for c, t, lo in comp_list
                 ]},
                 status=SyllabusStatus.validated,
+                approval_stage=ApprovalStage.fully_approved,
                 validated_at=now(-30),
             )
             db.add(syllabus)

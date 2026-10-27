@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
@@ -27,6 +28,17 @@ def create_course(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.instructor, UserRole.admin)),
 ):
+    norm = lambda col: func.upper(func.replace(col, " ", ""))
+    duplicate = db.query(Course).filter(
+        norm(Course.code) == payload.code.replace(" ", "").upper(),
+        norm(Course.academic_period) == payload.academic_period.replace(" ", "").upper(),
+    ).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{duplicate.code} already exists for {duplicate.academic_period}. "
+                   "Open it from My Syllabi instead of creating it again.",
+        )
     course = Course(**payload.model_dump(), instructor_id=current_user.id)
     db.add(course)
     db.commit()

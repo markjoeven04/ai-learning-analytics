@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.core.limiter import limiter
@@ -56,6 +57,25 @@ def _assert_course_access(course: Course, current_user: User):
         return
     if str(course.instructor_id) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this course")
+
+
+def _assert_no_twin_in_review(db: Session, syllabus: Syllabus, course: Course):
+    """Raise 409 if another syllabus for the same course code + academic period is under review or endorsed."""
+    norm = lambda col: func.upper(func.replace(col, " ", ""))
+    twin = (
+        db.query(Syllabus).join(Course, Course.id == Syllabus.course_id)
+        .filter(
+            Syllabus.id != syllabus.id,
+            norm(Course.code) == course.code.replace(" ", "").upper(),
+            norm(Course.academic_period) == course.academic_period.replace(" ", "").upper(),
+            Syllabus.approval_stage.notin_(EDITABLE_STAGES),
+        ).first()
+    )
+    if twin:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A syllabus for {course.code} ({course.academic_period}) is already under review or endorsed.",
+        )
 
 
 @router.post("/upload", response_model=SyllabusResponse, status_code=status.HTTP_201_CREATED)
@@ -414,6 +434,7 @@ def submit_for_review(
     course = db.query(Course).filter(Course.id == syllabus.course_id).first()
     if course:
         _assert_course_access(course, current_user)
+        _assert_no_twin_in_review(db, syllabus, course)
     syllabus.approval_stage = ApprovalStage.pending_pd
     notify_roles(db, [UserRole.program_director], current_user.college,
                  "syllabus_submitted", "Syllabus Pending Review",
@@ -542,6 +563,7 @@ def resubmit_syllabus(
     course = db.query(Course).filter(Course.id == syllabus.course_id).first()
     if course:
         _assert_course_access(course, current_user)
+        _assert_no_twin_in_review(db, syllabus, course)
     syllabus.approval_stage = ApprovalStage.pending_pd
     db.commit()
     db.refresh(syllabus)

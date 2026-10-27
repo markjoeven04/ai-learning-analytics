@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # .env also holds keys read elsewhere (POSTGRES_*, ADMIN_*)
 
 
 settings = Settings()

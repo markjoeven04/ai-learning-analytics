@@ -339,6 +339,10 @@ function MappingReview({ assessmentId, courseId, onDone }) {
   );
 }
 
+const EDIT_INPUT = "border border-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500";
+// Locked (under review / endorsed): read as plain text, not as an input box.
+const LOCKED_INPUT = "border border-transparent bg-transparent text-gray-800 cursor-default focus:outline-none";
+
 const saveDraft = (data) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); } catch {} };
 
 const BLOOM_LEVELS = ["Remembering", "Understanding", "Applying", "Analyzing", "Evaluating", "Creating"];
@@ -1204,7 +1208,7 @@ export default function ProcessingInterface() {
             </div>
             {compSearch && !competenciesLocked && <p className="text-xs text-gray-400 -mt-2">Clear search to enable drag-to-reorder</p>}
 
-            <fieldset disabled={competenciesLocked} className="space-y-2 max-h-96 overflow-y-auto min-w-0">
+            <div className="space-y-2 max-h-96 overflow-y-auto min-w-0">
               {filteredComps.map(({ comp, origIdx }) => (
                 <div key={origIdx}
                   draggable={!compSearch && !competenciesLocked}
@@ -1219,12 +1223,12 @@ export default function ProcessingInterface() {
                     )}
                     <input value={comp.competency_code}
                       onChange={e => { const c = [...editedCompetencies]; c[origIdx] = { ...c[origIdx], competency_code: e.target.value }; setEditedCompetencies(c); }}
-                      placeholder="Code"
-                      className="w-32 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 shrink-0" />
+                      placeholder="Code" readOnly={competenciesLocked}
+                      className={`w-32 rounded px-2 py-1 text-xs shrink-0 ${competenciesLocked ? LOCKED_INPUT + " font-semibold" : EDIT_INPUT}`} />
                     <input value={comp.topic_name}
                       onChange={e => { const c = [...editedCompetencies]; c[origIdx] = { ...c[origIdx], topic_name: e.target.value }; setEditedCompetencies(c); }}
-                      placeholder="Topic name"
-                      className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      placeholder="Topic name" readOnly={competenciesLocked}
+                      className={`flex-1 rounded px-2 py-1 text-xs ${competenciesLocked ? LOCKED_INPUT : EDIT_INPUT}`} />
                     {comp.confidence_score != null && (
                       <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
                         comp.confidence_score >= T.mapping_review_threshold ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
@@ -1267,12 +1271,15 @@ export default function ProcessingInterface() {
                                 c[origIdx] = { ...c[origIdx], learning_outcomes: los };
                                 setEditedCompetencies(c);
                               }}
-                              className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              readOnly={competenciesLocked}
+                              className={`w-full rounded px-2 py-1 text-xs ${competenciesLocked ? LOCKED_INPUT : EDIT_INPUT}`}
                               placeholder={`Learning outcome ${li + 1}`} />
                           ))}
-                          <button onClick={() => { const c = [...editedCompetencies]; c[origIdx] = { ...c[origIdx], learning_outcomes: [...(c[origIdx].learning_outcomes || []), ""] }; setEditedCompetencies(c); }}
-                            className="text-xs text-indigo-500 hover:underline">+ Add outcome</button>
+                          {!competenciesLocked && <button onClick={() => { const c = [...editedCompetencies]; c[origIdx] = { ...c[origIdx], learning_outcomes: [...(c[origIdx].learning_outcomes || []), ""] }; setEditedCompetencies(c); }}
+                            className="text-xs text-indigo-500 hover:underline">+ Add outcome</button>}
                         </>
+                      ) : competenciesLocked ? (
+                        <p className="text-xs text-gray-400 px-2">No learning outcomes listed.</p>
                       ) : (
                         <button onClick={() => { const c = [...editedCompetencies]; c[origIdx] = { ...c[origIdx], learning_outcomes: [""] }; setEditedCompetencies(c); }}
                           className="text-xs text-indigo-500 hover:underline">+ Add learning outcome</button>
@@ -1281,7 +1288,7 @@ export default function ProcessingInterface() {
                   )}
                 </div>
               ))}
-            </fieldset>
+            </div>
 
             {!competenciesLocked && (
               <div className="flex items-center gap-3">

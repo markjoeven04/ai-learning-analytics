@@ -132,3 +132,27 @@ def test_reupload_replaces_draft_and_is_refused_under_review(client, db, instruc
     assert db.query(Syllabus).filter(Syllabus.course_id == course_id).count() == 1
     client.post(f"/syllabi/{syllabus.id}/submit-for-review", headers=_auth(instructor_token))
     assert _upload(client, instructor_token, course_id).status_code == 409
+
+
+def test_duplicate_course_code_and_period_rejected(client, instructor_token, syllabus):
+    body = {"title": "DSA again", "code": "itc212", "academic_period": "AY 2025-2026 S1"}
+    r = client.post("/courses/", headers=_auth(instructor_token), json=body)
+    assert r.status_code == 409
+
+
+def test_second_copy_of_same_course_cannot_enter_review(client, db, instructor_token, instructor_user, syllabus):
+    r = client.post(f"/syllabi/{syllabus.id}/submit-for-review", headers=_auth(instructor_token))
+    assert r.status_code == 200, r.text
+    # A pre-existing duplicate course row (created before the course-level guard) with its own draft syllabus
+    twin_course = Course(title="DSA", code="ITC 212", academic_period="AY 2025-2026 S1",
+                         instructor_id=instructor_user.id)
+    db.add(twin_course)
+    db.flush()
+    twin = Syllabus(course_id=twin_course.id, file_path="y", status=SyllabusStatus.pending)
+    db.add(twin)
+    db.commit()
+    r = client.post(f"/syllabi/{twin.id}/submit-for-review", headers=_auth(instructor_token))
+    assert r.status_code == 409
+    # Re-submitting the same syllabus (double click) is also refused
+    r = client.post(f"/syllabi/{syllabus.id}/submit-for-review", headers=_auth(instructor_token))
+    assert r.status_code == 400
