@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import Layout from "../components/Layout";
+import SyllabusDetails from "../components/SyllabusDetails";
 import { useAuth } from "../context/AuthContext";
 
 const STAGE_LABELS = {
@@ -44,7 +45,7 @@ function ApprovalChain({ stage }) {
     <div className="flex items-center gap-1 mt-2">
       {CHAIN_NODES.map((node, i) => {
         const nodeStageIdx = STAGE_ORDER.indexOf(node.key);
-        const done = !rejected && currentIdx > nodeStageIdx;
+        const done = !rejected && (currentIdx > nodeStageIdx || stage === "fully_approved");
         const active = !rejected && currentIdx === nodeStageIdx;
 
         return (
@@ -74,6 +75,7 @@ function ApprovalChain({ stage }) {
 }
 
 function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
+  const [open, setOpen] = useState(false);
   const stage = syllabus.approval_stage || "draft";
   const status = syllabus.status || "pending";
   const compCount = (syllabus.competencies || []).length;
@@ -85,7 +87,7 @@ function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
             {syllabus.course_code} &bull; {syllabus.course_academic_period}
           </p>
-          <h3 className="text-sm font-semibold text-gray-800 mt-0.5 truncate">{syllabus.course_title}</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mt-0.5 truncate" title={syllabus.course_title}>{syllabus.course_title}</h3>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[status] || "bg-gray-100 text-gray-600"}`}>
@@ -104,6 +106,10 @@ function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
       <ApprovalChain stage={stage} />
 
       <div className="mt-4 flex items-center gap-2 flex-wrap">
+        <button onClick={() => setOpen(o => !o)} aria-expanded={open}
+          className="px-3 py-1.5 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors">
+          {open ? "Hide" : "View syllabus"}
+        </button>
         {stage === "draft" && (
           <button
             onClick={() => onContinue(syllabus)}
@@ -154,6 +160,7 @@ function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
           </button>
         )}
       </div>
+      {open && <SyllabusDetails s={syllabus} />}
     </div>
   );
 }
