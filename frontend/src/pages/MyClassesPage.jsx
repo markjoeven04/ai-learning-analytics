@@ -252,6 +252,11 @@ function CompetencyChart({ courseId, onFilterByCompetency, activeCompetency }) {
 
 function StudentProfileDrawer({ student, courseId, onClose }) {
   const T = useThresholds();
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const { data: profile, loading } = useApi(
     student && courseId
       ? `/analytics/courses/${courseId}/students/${student.student_id_hash}/profile`

@@ -2,8 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import Layout from "../components/Layout";
-
-const DRAFT_KEY = "ailas_wizard_draft";
+import { useAuth } from "../context/AuthContext";
 
 const STAGE_LABELS = {
   draft: "Draft",
@@ -126,7 +125,7 @@ function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
             Refresh
           </button>
         )}
-        {stage === "fully_approved" && status !== "validated" && (
+        {stage === "fully_approved" && (
           <button
             onClick={() => onContinue(syllabus)}
             className="px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-1"
@@ -171,6 +170,8 @@ function filterByTab(syllabi, tab) {
 
 export default function MySyllabiPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const DRAFT_KEY = `ailas_wizard_draft:${user?.id}`;
   const [syllabi, setSyllabi] = useState([]);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState(null);
@@ -216,7 +217,7 @@ export default function MySyllabiPage() {
 
   const handleContinue = (syllabus) => {
     const draft = {
-      step: "syllabus",
+      step: "validate",
       course: {
         id: syllabus.course_id,
         title: syllabus.course_title,

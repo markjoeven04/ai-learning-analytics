@@ -136,7 +136,7 @@ export default function CurriculaPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
-                <div className="flex-1 min-w-0">
+                <div onClick={() => toggleExpand(c.id)} className="flex-1 min-w-0 cursor-pointer">
                   <span className="font-medium text-gray-800 text-sm">{c.name}</span>
                   <span className="ml-2 text-xs text-gray-400">{programName(c.program_id)} · AY {c.effective_year} · {c.total_units} units</span>
                 </div>

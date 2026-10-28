@@ -4,6 +4,7 @@ import ExamQuestionsPanel from "../components/ExamQuestionsPanel";
 import api from "../services/api";
 import { useApi } from "../hooks/useApi";
 import { useThresholds } from "../hooks/useThresholds";
+import { useAuth } from "../context/AuthContext";
 
 // Competencies can be edited only before submission or after a rejection (locked once endorsed).
 const EDITABLE_STAGES = ["draft", "rejected"];
@@ -23,7 +24,6 @@ const OCR_PHASES = [
   { key: "nlp", label: "NLP Topic Classification", icon: "M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.001 3.001 0 0012 15a3 3 0 00-2.971 2.589l-.347-.346z" },
   { key: "risk", label: "Risk Classification Rules", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
 ];
-const DRAFT_KEY = "ailas_wizard_draft";
 
 function InfoTooltip({ text }) {
   return (
@@ -141,7 +141,15 @@ function PhaseIndicator({ phases, activeIndex, done }) {
 
 function MappingReview({ assessmentId, courseId, onDone }) {
   const T = useThresholds();
-  const { data: items, loading } = useApi(`/assessments/${assessmentId}/mapping-queue`);
+  const { data: items, loading, refetch } = useApi(`/assessments/${assessmentId}/mapping-queue`);
+  // The AI maps questions in the background after upload; until it finishes the queue is empty.
+  const { data: allItems, refetch: refetchAll } = useApi(`/assessments/${assessmentId}/items`);
+  const stillMapping = (allItems || []).filter(i => !i.ai_mapped_at && !i.mapped_competency_id).length;
+  useEffect(() => {
+    if (!stillMapping) return;
+    const t = setInterval(() => { refetch(); refetchAll(); }, 3000);
+    return () => clearInterval(t);
+  }, [stillMapping, refetch, refetchAll]);
   const { data: competencies } = useApi(`/syllabi/courses/${courseId}/competencies`);
   const [filterLow, setFilterLow] = useState(false);
   const [overrides, setOverrides] = useState({});
@@ -183,7 +191,7 @@ function MappingReview({ assessmentId, courseId, onDone }) {
     } finally { setSaving(false); }
   };
 
-  if (loading) {
+  if ((loading && !items) || !allItems) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3 animate-pulse">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -196,6 +204,16 @@ function MappingReview({ assessmentId, courseId, onDone }) {
             </div>
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (!items?.length && stillMapping) {
+    return (
+      <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-8 text-center space-y-2">
+        <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto" />
+        <p className="text-indigo-700 font-semibold">AI is mapping {stillMapping} question{stillMapping === 1 ? "" : "s"} to competencies…</p>
+        <p className="text-sm text-indigo-600">This usually takes under a minute. The list appears here when it's done.</p>
       </div>
     );
   }
@@ -343,7 +361,6 @@ const EDIT_INPUT = "border border-gray-300 focus:outline-none focus:ring-1 focus
 // Locked (under review / endorsed): read as plain text, not as an input box.
 const LOCKED_INPUT = "border border-transparent bg-transparent text-gray-800 cursor-default focus:outline-none";
 
-const saveDraft = (data) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); } catch {} };
 
 const BLOOM_LEVELS = ["Remembering", "Understanding", "Applying", "Analyzing", "Evaluating", "Creating"];
 const BLOOM_COLORS = {
@@ -470,6 +487,10 @@ function TosEditor({ assessment, courseId, onDone }) {
 }
 
 export default function ProcessingInterface() {
+  const { user } = useAuth();
+  // Per-user key, so a shared browser never restores another instructor's progress.
+  const DRAFT_KEY = `ailas_wizard_draft:${user?.id}`;
+  const saveDraft = (data) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); } catch {} };
   const T = useThresholds();
   const [step, setStep] = useState("course");
   const [courseForm, setCourseForm] = useState({ title: "", code: "", academic_period: "" });
@@ -498,6 +519,7 @@ export default function ProcessingInterface() {
   const [courseErrors, setCourseErrors] = useState({});
   const [assessmentErrors, setAssessmentErrors] = useState({});
   const [curricula, setCurricula] = useState([]);
+  const [existingAssessments, setExistingAssessments] = useState([]);
   const [currSubjects, setCurrSubjects] = useState([]);
   const [selectedCurriculumId, setSelectedCurriculumId] = useState("");
   const [approvalStage, setApprovalStage] = useState(null);
@@ -619,6 +641,18 @@ export default function ProcessingInterface() {
     } catch {}
   }, [syllabus, course, editedCompetencies, originalCompetencies, assessmentForm]);
 
+  // Offer the course's existing assessments, so progress isn't tied to this browser's draft
+  useEffect(() => {
+    if (step === "assessment" && !assessment && course?.id) {
+      api.get(`/assessments/course/${course.id}`).then(res => setExistingAssessments(res.data || [])).catch(() => setExistingAssessments([]));
+    }
+  }, [step, assessment, course?.id]);
+
+  const continueAssessment = (a) => {
+    setAssessment(a); setStep("csv");
+    saveDraft({ step: "csv", course, syllabus, editedCompetencies, originalCompetencies, assessmentForm, assessment: a });
+  };
+
   // Auto-refresh approval stage whenever the review step becomes active with a known syllabus
   useEffect(() => {
     if (step === "validate" && syllabus?.id) {
@@ -717,9 +751,8 @@ export default function ProcessingInterface() {
     setError(""); setLoading(true);
     try {
       const res = await api.post(`/assessments/${course.id}`, assessmentForm);
-      setAssessment(res.data);
-      setStep("csv");
-      saveDraft({ step: "csv", course, syllabus, editedCompetencies, originalCompetencies, assessmentForm, assessment: res.data });
+      setAssessment(res.data);  // stays on this step: the TOS editor shows next
+      saveDraft({ step: "assessment", course, syllabus, editedCompetencies, originalCompetencies, assessmentForm, assessment: res.data });
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to create assessment");
     } finally { setLoading(false); }
@@ -1326,6 +1359,20 @@ export default function ProcessingInterface() {
               <h2 className="text-base font-semibold text-gray-700">Create Assessment</h2>
               <p className="text-sm text-gray-500 mt-0.5">{STEP_DESCRIPTIONS.assessment}</p>
             </div>
+            {existingAssessments.length > 0 && (
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 space-y-2">
+                <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Or continue an existing assessment</p>
+                {existingAssessments.map(a => (
+                  <div key={a.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-gray-700">{a.title} <span className="text-xs text-gray-400">· {a.approval_status || "draft"}</span></span>
+                    <button type="button" onClick={() => continueAssessment(a)}
+                      className="text-xs font-medium text-indigo-600 border border-indigo-200 bg-white rounded-lg px-3 py-1 hover:bg-indigo-50">
+                      Continue →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
               <input required placeholder="e.g. Prelim Exam"

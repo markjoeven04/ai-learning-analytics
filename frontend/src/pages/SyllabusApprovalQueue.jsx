@@ -206,6 +206,12 @@ export default function SyllabusApprovalQueue() {
   // History modal
   const [historyTarget, setHistoryTarget] = useState(null);
   const [history, setHistory] = useState([]);
+  useEffect(() => {
+    if (!historyTarget) return;
+    const onKey = e => { if (e.key === "Escape") setHistoryTarget(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [historyTarget]);
 
   const [toast, setToast] = useState(null);
   const showToast = (message, type = "success") => setToast({ message, type });
