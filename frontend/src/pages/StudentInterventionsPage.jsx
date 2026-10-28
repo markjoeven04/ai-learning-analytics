@@ -4,6 +4,7 @@ import RiskBadge from "../components/RiskBadge";
 import { useApi } from "../hooks/useApi";
 import api from "../services/api";
 import { useThresholds } from "../hooks/useThresholds";
+import { openResourceFile } from "../utils/resourceFile";
 
 const INTERVENTION_TYPE_CONFIG = {
   academic_counseling:        { label: "Academic Counseling",         bg: "bg-blue-100",   text: "text-blue-700" },
@@ -34,6 +35,7 @@ function ResourceCard({ rec, index }) {
   return (
     <a
       href={rec.url || "#"}
+      onClick={rec.has_file ? (e) => { e.preventDefault(); openResourceFile(rec); } : undefined}
       target={rec.url ? "_blank" : "_self"}
       rel="noreferrer"
       className="flex items-start gap-3 p-3.5 rounded-xl border border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors group"

@@ -20,7 +20,7 @@ from backend.models.user import User, UserRole, COLLEGE_SCOPED_ROLES
 from backend.models.course import Course
 from backend.models.syllabus import Syllabus, SyllabusStatus, Competency, SyllabusApproval, ApprovalStage
 from backend.schemas.syllabus import (
-    CustomCompetencyCreate, SyllabusApprovalCreate, SyllabusApprovalResponse, SyllabusCompetenciesUpdate,
+    CustomCompetencyCreate, PendingSyllabusResponse, SyllabusApprovalCreate, SyllabusApprovalResponse, SyllabusCompetenciesUpdate,
     SyllabusResponse, SyllabusValidateRequest, SyllabusWithCourseResponse,
 )
 from backend.services.ocr.extractor import extract_text
@@ -246,7 +246,7 @@ def create_custom_competency(
             "topic_name": competency.topic_name, "source": competency.source}
 
 
-@router.get("/pending-approval", response_model=list[SyllabusResponse])
+@router.get("/pending-approval", response_model=list[PendingSyllabusResponse])
 def get_pending_approval(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -255,26 +255,30 @@ def get_pending_approval(
         raise HTTPException(status_code=403, detail="Only approvers can view the approval queue")
     required_stage, _ = APPROVAL_CHAIN[current_user.role]
 
-    # VP sees all colleges; PD and Dean see only their own college
-    if current_user.role == UserRole.vp_academic_affairs:
-        return db.query(Syllabus).filter(Syllabus.approval_stage == required_stage).all()
-
-    if not current_user.college:
-        raise HTTPException(
-            status_code=403,
-            detail="Your account has no college assigned. Contact an administrator."
-        )
-
-    return (
-        db.query(Syllabus)
+    rows = (
+        db.query(Syllabus, Course, User)
         .join(Course, Syllabus.course_id == Course.id)
-        .join(User, Course.instructor_id == User.id)
-        .filter(
-            Syllabus.approval_stage == required_stage,
-            User.college == current_user.college,
-        )
-        .all()
+        .outerjoin(User, Course.instructor_id == User.id)
+        .filter(Syllabus.approval_stage == required_stage)
     )
+    # VP sees all colleges; PD and Dean see only their own college
+    if current_user.role != UserRole.vp_academic_affairs:
+        if not current_user.college:
+            raise HTTPException(
+                status_code=403,
+                detail="Your account has no college assigned. Contact an administrator."
+            )
+        rows = rows.filter(User.college == current_user.college)
+
+    return [
+        PendingSyllabusResponse.model_validate(syllabus).model_copy(update={
+            "course_title": course.title,
+            "course_code": course.code,
+            "course_academic_period": course.academic_period,
+            "instructor_name": instructor.full_name if instructor else None,
+        })
+        for syllabus, course, instructor in rows.all()
+    ]
 
 
 @router.get("/mine", response_model=list[SyllabusWithCourseResponse])

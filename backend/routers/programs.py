@@ -69,5 +69,14 @@ def delete_program(
     program = db.query(Program).filter(Program.id == program_id).first()
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
+    # Curricula hold subjects, sections and enrollments; deleting them would fail (500) or lose data.
+    if program.curricula:
+        names = ", ".join(c.name for c in program.curricula)
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{program.program_name} still has {len(program.curricula)} "
+                    f"{'curriculum' if len(program.curricula) == 1 else 'curricula'} ({names}). "
+                    "A program with curricula cannot be deleted; set its curricula to inactive or archived instead."),
+        )
     db.delete(program)
     db.commit()

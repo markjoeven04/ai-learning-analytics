@@ -10,6 +10,7 @@ import RiskBadge from "../components/RiskBadge";
 import { useApi } from "../hooks/useApi";
 import { useAuth } from "../context/AuthContext";
 import { useThresholds } from "../hooks/useThresholds";
+import { openResourceFile } from "../utils/resourceFile";
 
 ChartJS.register(
   CategoryScale, LinearScale, RadialLinearScale,
@@ -268,6 +269,7 @@ function CourseDetail({ course }) {
                 )}
                 {r.url && (
                   <a href={r.url} target="_blank" rel="noreferrer"
+                    onClick={r.has_file ? (e) => { e.preventDefault(); openResourceFile(r); } : undefined}
                     className="text-xs font-medium text-indigo-600 hover:text-indigo-800 shrink-0">
                     Open →
                   </a>

@@ -61,6 +61,7 @@ class ResourceCreate(BaseModel):
     type: str
     url: str
     competency_tags: list[str] = []
+    description: str | None = None
 
 
 class ResourceResponse(BaseModel):
@@ -69,6 +70,7 @@ class ResourceResponse(BaseModel):
     type: str
     url: str
     competency_tags: list[str] = []
+    description: str | None = None
     helpful_count: int = 0
     not_helpful_count: int = 0
     model_config = {"from_attributes": True}

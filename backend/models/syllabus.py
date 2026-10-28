@@ -56,6 +56,10 @@ class SyllabusApproval(Base):
     syllabus = relationship("Syllabus", back_populates="approvals")
     approver = relationship("User")
 
+    @property
+    def approver_name(self):
+        return self.approver.full_name if self.approver else None
+
 
 class Competency(Base):
     __tablename__ = "competencies"

@@ -15,8 +15,13 @@ from backend.models.course import Course
 from backend.models.grade_submission import GradeSubmission, GradeSubmissionApproval, GradeSubmissionStatus
 from backend.schemas.grade_submission import (
     GradeSubmissionCreate, GradeSubmissionResponse,
-    GradeSubmissionApprovalCreate, GradeSubmissionApprovalResponse,
+    GradeSubmissionApprovalCreate, GradeSubmissionApprovalResponse, GradeSubmissionQueueItem,
 )
+from backend.models.assessment import Assessment
+from backend.models.score import StudentScore
+from backend.core.security import hash_student_id
+from backend.models.grade_scale import GradeScale
+from backend.services.grading import get_letter_grade
 
 router = APIRouter(prefix="/grade-submissions", tags=["grade-submissions"])
 
@@ -35,7 +40,64 @@ def _assert_instructor_access(submission: GradeSubmission, current_user: User):
         raise HTTPException(status_code=403, detail="You do not own this grade submission")
 
 
-@router.get("/pending", response_model=list[GradeSubmissionResponse])
+ROLE_LABELS = {"program_director": "Program Director", "dean": "Dean", "vp_academic_affairs": "VP for Academic Affairs"}
+
+
+def _queue_item(sub: GradeSubmission, db: Session, passing: float) -> GradeSubmissionQueueItem:
+    """What the approver signs off: the course, its instructor, the period's results, earlier sign-offs."""
+    course, instructor = sub.course, sub.instructor
+    period = getattr(sub.grading_period, "value", sub.grading_period)
+    assessments = (db.query(Assessment)
+                   .filter(Assessment.course_id == sub.course_id, Assessment.grading_period == period)
+                   .order_by(Assessment.date, Assessment.title).all())
+    per_student: dict = {}
+    rows = []
+    for a in assessments:
+        by_student: dict = {}
+        for sc in db.query(StudentScore).filter(StudentScore.assessment_id == a.id).all():
+            pct = sc.score / sc.max_score * 100 if sc.max_score else 0.0
+            by_student.setdefault(sc.student_id_hash, []).append(pct)
+            per_student.setdefault(sc.student_id_hash, []).append(pct)
+        avgs = [sum(v) / len(v) for v in by_student.values()]
+        rows.append({"title": a.title, "type": getattr(a.type, "value", a.type),
+                     "approval_status": getattr(a.approval_status, "value", a.approval_status),
+                     "students": len(avgs), "average": round(sum(avgs) / len(avgs), 1) if avgs else None})
+    student_avgs = [sum(v) / len(v) for v in per_student.values()]
+    # The grade sheet itself, read-only: who got what, as the official BTECH grade.
+    students = db.query(User).filter(User.role == UserRole.student, User.student_number.isnot(None)).all()
+    by_hash = {hash_student_id(u.student_number): u for u in students}
+    grades = []
+    for sid_hash, v in per_student.items():
+        pct = sum(v) / len(v)
+        u = by_hash.get(sid_hash)
+        grade = get_letter_grade(pct, db)
+        grades.append({"name": u.full_name if u else "Unlinked student record",
+                       "student_number": u.student_number if u else None,
+                       "percent": round(pct, 2), "grade": grade, "passed": pct >= passing})
+    grades.sort(key=lambda g: g["name"].lower())
+    approvals = []
+    for ap in sorted(sub.approvals, key=lambda x: x.reviewed_at or datetime.min.replace(tzinfo=timezone.utc)):
+        who = db.get(User, ap.approver_id)
+        approvals.append({"role": ROLE_LABELS.get(ap.role, ap.role), "status": ap.status,
+                          "approver_name": who.full_name if who else None, "feedback": ap.feedback,
+                          "reviewed_at": ap.reviewed_at.isoformat() if ap.reviewed_at else None})
+    return GradeSubmissionQueueItem(
+        **GradeSubmissionResponse.model_validate(sub).model_dump(),
+        course_code=course.code if course else None,
+        course_title=course.title if course else None,
+        course_academic_period=course.academic_period if course else None,
+        instructor_name=instructor.full_name if instructor else None,
+        passing_threshold=passing,
+        students=len(student_avgs),
+        class_average=round(sum(student_avgs) / len(student_avgs), 1) if student_avgs else None,
+        below_passing=sum(1 for v in student_avgs if v < passing),
+        grades=grades,
+        assessments=rows,
+        approvals=approvals,
+    )
+
+
+@router.get("/pending", response_model=list[GradeSubmissionQueueItem])
 def get_pending_submissions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -44,13 +106,18 @@ def get_pending_submissions(
         raise HTTPException(status_code=403, detail="Only approvers can view the grade submission queue")
     required_stage, _ = APPROVAL_CHAIN[current_user.role]
 
+    # Passing comes from the grade scale (lowest bracket above 5.00), not the competency-mastery setting.
+    lowest_pass = (db.query(GradeScale).filter(GradeScale.grade_points < 5)
+                   .order_by(GradeScale.min_percent).first())
+    passing = lowest_pass.min_percent if lowest_pass else 75.0
     if current_user.role == UserRole.vp_academic_affairs:
-        return db.query(GradeSubmission).filter(GradeSubmission.status == required_stage).all()
+        subs = db.query(GradeSubmission).filter(GradeSubmission.status == required_stage).all()
+        return [_queue_item(x, db, passing) for x in subs]
 
     if not current_user.college:
         raise HTTPException(status_code=403, detail="Your account has no college assigned. Contact an administrator.")
 
-    return (
+    subs = (
         db.query(GradeSubmission)
         .join(User, GradeSubmission.instructor_id == User.id)
         .filter(
@@ -59,6 +126,7 @@ def get_pending_submissions(
         )
         .all()
     )
+    return [_queue_item(x, db, passing) for x in subs]
 
 
 @router.get("/mine", response_model=list[GradeSubmissionResponse])

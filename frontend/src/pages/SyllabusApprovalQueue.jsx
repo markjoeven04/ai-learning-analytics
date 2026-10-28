@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "../components/Layout";
-import SyllabusDetails, { AlignmentCheck } from "../components/SyllabusDetails";
+import SyllabusDetails from "../components/SyllabusDetails";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 
@@ -42,10 +42,24 @@ const NEXT_STAGE_LABEL = {
 // The VP for Academic Affairs gives the final endorsement rather than an approval.
 const actionVerb = (role) => (role === "vp_academic_affairs" ? "Endorse" : "Approve");
 
+// Who and what the approver is signing off, by name rather than by ID.
+function CourseInfo({ s }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-sm font-semibold text-gray-800 truncate" title={s.course_title}>
+        {s.course_code && <span className="text-indigo-600 mr-1.5">{s.course_code}</span>}
+        {s.course_title || s.parsed_json?.course_title || "Untitled course"}
+      </p>
+      <p className="text-xs text-gray-500">
+        {[s.instructor_name && `Instructor: ${s.instructor_name}`, s.course_academic_period].filter(Boolean).join(" · ")}
+      </p>
+    </div>
+  );
+}
+
 function SyllabusCard({ s, acting, verb, onApprove, onReject, onHistory }) {
   const [open, setOpen] = useState(false);
   const compCount = s.competencies?.length ?? 0;
-  const courseSnippet = s.course_id ? s.course_id.slice(0, 8) + "…" : "—";
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
@@ -61,18 +75,12 @@ function SyllabusCard({ s, acting, verb, onApprove, onReject, onHistory }) {
               </span>
             )}
           </div>
-          <p className="text-sm font-semibold text-gray-800 truncate">
-            {s.parsed_json?.course_title || `Syllabus — Course ${courseSnippet}`}
-          </p>
-          <div className="flex items-center gap-4 text-xs text-gray-400">
-            <span>Course ID: <span className="font-mono">{courseSnippet}</span></span>
-            <span>Syllabus: <span className="font-mono">{s.id.slice(0, 8)}…</span></span>
-          </div>
+          <CourseInfo s={s} />
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setOpen(o => !o)} aria-expanded={open}
-            className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors">
-            {open ? "Hide" : "View"}
+            className="text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors">
+            {open ? "Hide syllabus" : "View syllabus"}
           </button>
           <button onClick={() => onHistory(s.id)}
             className="text-xs text-gray-500 hover:text-indigo-600 border border-gray-200 px-2.5 py-1.5 rounded-lg transition-colors">
@@ -171,7 +179,7 @@ export default function SyllabusApprovalQueue() {
   const roleLabel = {
     program_director: "Program Director",
     dean: "Dean",
-    vp_academic_affairs: "VP Academic Affairs",
+    vp_academic_affairs: "VP for Academic Affairs",
   }[user?.role] || user?.role;
 
   const nextStageLabel = NEXT_STAGE_LABEL[user?.role] || "next stage";
@@ -222,7 +230,7 @@ export default function SyllabusApprovalQueue() {
         {/* ── Approve confirmation modal ── */}
         {approveTarget && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
               <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center shrink-0">
                   <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -235,29 +243,15 @@ export default function SyllabusApprovalQueue() {
                 </div>
               </div>
 
-              <div className="px-6 py-4 space-y-4">
-                <AlignmentCheck syllabusId={approveTarget.id} />
-                {/* Syllabus summary */}
-                <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Syllabus</span>
-                    <span className="font-mono">{approveTarget.id.slice(0, 12)}…</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Competencies</span>
-                    <span className="font-medium text-gray-700">{approveTarget.competencies?.length ?? 0}</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Current stage</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_COLORS[approveTarget.approval_stage]}`}>
-                      {STAGE_LABELS[approveTarget.approval_stage]}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Will advance to</span>
-                    <span className="text-green-600 font-medium">{nextStageLabel}</span>
-                  </div>
+              <div className="px-6 py-4 space-y-4 overflow-y-auto">
+                <CourseInfo s={approveTarget} />
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <span className={`px-2 py-0.5 rounded-full font-medium ${STAGE_COLORS[approveTarget.approval_stage]}`}>
+                    {STAGE_LABELS[approveTarget.approval_stage]}
+                  </span>
+                  <span>→ will advance to <span className="text-green-600 font-medium">{nextStageLabel}</span></span>
                 </div>
+                <SyllabusDetails s={approveTarget} />
 
                 {/* Optional comment */}
                 <div>
@@ -294,7 +288,7 @@ export default function SyllabusApprovalQueue() {
         {/* ── Reject modal ── */}
         {rejectTarget && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
               <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0">
                   <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -307,18 +301,9 @@ export default function SyllabusApprovalQueue() {
                 </div>
               </div>
 
-              <div className="px-6 py-4 space-y-4">
-                {/* Syllabus summary */}
-                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Syllabus</span>
-                    <span className="font-mono">{rejectTarget.id.slice(0, 12)}…</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Competencies</span>
-                    <span className="font-medium text-gray-700">{rejectTarget.competencies?.length ?? 0}</span>
-                  </div>
-                </div>
+              <div className="px-6 py-4 space-y-4 overflow-y-auto">
+                <CourseInfo s={rejectTarget} />
+                <SyllabusDetails s={rejectTarget} />
 
                 {/* Required feedback */}
                 <div>
@@ -371,7 +356,7 @@ export default function SyllabusApprovalQueue() {
                     <span className={`mt-0.5 w-2.5 h-2.5 rounded-full shrink-0 ${h.status === "approved" ? "bg-green-500" : "bg-red-500"}`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-700 capitalize">{h.role.replace(/_/g, " ")}</span>
+                        <span className="font-medium text-gray-700"><span className="capitalize">{h.role.replace(/_/g, " ")}</span>{h.approver_name && ` · ${h.approver_name}`}</span>
                         <span className={`text-xs font-medium ${h.status === "approved" ? "text-green-600" : "text-red-600"}`}>
                           {h.status === "approved" && h.role === "vp_academic_affairs" ? "endorsed" : h.status}
                         </span>

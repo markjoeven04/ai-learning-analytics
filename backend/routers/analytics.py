@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -1253,6 +1253,65 @@ def create_resource(
     db.commit()
     db.refresh(resource)
     return resource
+
+
+_RESOURCE_TYPES = {"video", "reading", "exercise"}
+
+
+@router.put("/resources/{resource_id}", response_model=ResourceResponse)
+def update_resource(
+    resource_id: str,
+    payload: ResourceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.instructor, UserRole.admin)),
+):
+    resource = db.query(Resource).filter(Resource.id == resource_id).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    for field, value in payload.model_dump().items():
+        setattr(resource, field, value)
+    db.commit()
+    db.refresh(resource)
+    return resource
+
+
+@router.post("/resources/bulk-import")
+def bulk_import_resources(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.instructor, UserRole.admin)),
+):
+    """CSV columns: title, type (video/reading/exercise), url required; competency_tags
+    (comma- or semicolon-separated), description optional. Bad rows are reported, not fatal."""
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files are accepted")
+    reader = csv.DictReader(io.StringIO(file.file.read().decode("utf-8-sig")))
+    if not {"title", "type", "url"}.issubset(set(reader.fieldnames or [])):
+        raise HTTPException(status_code=400, detail="CSV must contain the columns: title, type, url")
+    existing_urls = {u for (u,) in db.query(Resource.url).filter(Resource.course_id.is_(None)).all()}
+    imported, skipped, errors = 0, 0, []
+    for i, row in enumerate(reader, start=2):
+        title = (row.get("title") or "").strip()
+        rtype = (row.get("type") or "").strip().lower()
+        url = (row.get("url") or "").strip()
+        missing = [k for k, v in (("title", title), ("type", rtype), ("url", url)) if not v]
+        if missing:
+            errors.append(f"Row {i}: missing {', '.join(missing)}")
+            continue
+        if rtype not in _RESOURCE_TYPES:
+            errors.append(f"Row {i}: type '{rtype}' must be video, reading or exercise")
+            continue
+        if url in existing_urls:
+            skipped += 1
+            errors.append(f"Row {i}: '{title}' skipped, a resource with this URL already exists")
+            continue
+        tags = [t.strip() for t in (row.get("competency_tags") or "").replace(";", ",").split(",") if t.strip()]
+        db.add(Resource(title=title, type=rtype, url=url, competency_tags=tags,
+                        description=(row.get("description") or "").strip() or None))
+        existing_urls.add(url)
+        imported += 1
+    db.commit()
+    return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
 @router.delete("/resources/{resource_id}", status_code=204)

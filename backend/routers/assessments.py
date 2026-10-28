@@ -19,7 +19,7 @@ from backend.models.syllabus import Competency, SyllabusStatus
 from backend.models.score import StudentScore
 from backend.schemas.assessment import (
     AssessmentCreate, AssessmentResponse, AssessmentItemResponse, UploadSummary,
-    AssessmentApprovalCreate, AssessmentApprovalResponse,
+    AssessmentApprovalCreate, AssessmentApprovalResponse, AssessmentQueueItem,
 )
 from backend.schemas.tos import TosCreate, TosResponse
 from backend.models.tos import TableOfSpecifications
@@ -175,7 +175,7 @@ def _map_unmapped_items(assessment_id: str, db: Session):
     db.commit()
 
 
-@router.get("/pending-approval", response_model=list[AssessmentResponse])
+@router.get("/pending-approval", response_model=list[AssessmentQueueItem])
 def get_pending_approval(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -189,7 +189,18 @@ def get_pending_approval(
             .join(User, Course.instructor_id == User.id)
             .filter(User.college == current_user.college)
         )
-    return q.all()
+    out = []
+    for a in q.all():
+        course = a.course
+        instructor = db.get(User, course.instructor_id) if course else None
+        out.append(AssessmentQueueItem(
+            **AssessmentResponse.model_validate(a).model_dump(),
+            course_code=course.code if course else None,
+            course_title=course.title if course else None,
+            course_academic_period=course.academic_period if course else None,
+            instructor_name=instructor.full_name if instructor else None,
+        ))
+    return out
 
 
 REVIEWER_ROLES = {UserRole.program_director, UserRole.dean, UserRole.vp_academic_affairs}

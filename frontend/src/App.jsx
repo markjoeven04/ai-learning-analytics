@@ -81,7 +81,7 @@ export default function App() {
       <Route path="/reports" element={<ProtectedRoute allowedRoles={["admin","instructor","program_director","dean","vp_academic_affairs"]}><ReportsPage /></ProtectedRoute>} />
       <Route path="/instructor/course-resources" element={<ProtectedRoute allowedRoles={["instructor","admin"]}><CourseResourcesPage /></ProtectedRoute>} />
       <Route path="/resource-library" element={<ProtectedRoute allowedRoles={["admin","instructor"]}><ResourcesPage /></ProtectedRoute>} />
-      <Route path="/settings" element={<ProtectedRoute allowedRoles={["student","instructor","admin"]}><SettingsPage /></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute allowedRoles={["student","instructor","admin","program_director","dean","vp_academic_affairs"]}><SettingsPage /></ProtectedRoute>} />
       <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={["admin"]}><AuditLogsPage /></ProtectedRoute>} />
       <Route path="/admin/programs" element={<ProtectedRoute allowedRoles={["admin"]}><ProgramsPage /></ProtectedRoute>} />
       <Route path="/admin/curricula" element={<ProtectedRoute allowedRoles={["admin"]}><CurriculaPage /></ProtectedRoute>} />

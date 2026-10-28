@@ -5,6 +5,7 @@ import RiskBadge from "../components/RiskBadge";
 import { useApi } from "../hooks/useApi";
 import api from "../services/api";
 import { useThresholds } from "../hooks/useThresholds";
+import { openResourceFile } from "../utils/resourceFile";
 
 const RISK_ORDER = { "At-Risk": 0, "On-Track": 1, "Excelling": 2 };
 const PAGE_SIZE = 10;
@@ -395,6 +396,7 @@ function StudentProfileDrawer({ student, courseId, onClose }) {
                     <a
                       key={r.id ?? i}
                       href={r.url}
+                      onClick={r.has_file ? (e) => { e.preventDefault(); openResourceFile(r); } : undefined}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors group"

@@ -25,6 +25,22 @@ class GradeSubmissionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class GradeSubmissionQueueItem(GradeSubmissionResponse):
+    """Pending row with what the approver is signing off: course, instructor, the period's results
+    and the earlier sign-offs in the chain."""
+    course_code: Optional[str] = None
+    course_title: Optional[str] = None
+    course_academic_period: Optional[str] = None
+    instructor_name: Optional[str] = None
+    passing_threshold: Optional[float] = None
+    students: int = 0
+    class_average: Optional[float] = None
+    below_passing: int = 0
+    assessments: list[dict] = []
+    approvals: list[dict] = []
+    grades: list[dict] = []  # per student: name, student_number, percent, grade, passed
+
+
 class GradeSubmissionApprovalCreate(BaseModel):
     feedback: Optional[str] = None
 

@@ -76,3 +76,21 @@ def test_program_director_of_same_college_can_view(client, db, exam):
 
 def test_student_cannot_view(client, student_token, exam):
     assert client.get(f"/assessments/{exam.id}/alignment-hints", headers=_auth(student_token)).status_code == 403
+
+
+def test_program_director_reads_but_cannot_edit_exam_questions(client, db, exam):
+    pd = User(email="pd@test.com", password_hash=hash_password("x"), full_name="PD",
+              role=UserRole.program_director, is_active=True, college="ICS")
+    db.add(pd)
+    db.commit()
+    headers = _auth(create_access_token({"sub": str(pd.id), "role": pd.role, "jti": str(uuid.uuid4())}))
+    assert client.get(f"/assessments/{exam.id}/questions", headers=headers).status_code == 200
+    body = {"question_text": "Changed by PD", "question_type": "short_answer", "points": 1}
+    assert client.post(f"/assessments/{exam.id}/questions", headers=headers, json=body).status_code == 403
+
+    vp = User(email="vp@test.com", password_hash=hash_password("x"), full_name="VP",
+              role=UserRole.vp_academic_affairs, is_active=True)
+    db.add(vp)
+    db.commit()
+    vp_headers = _auth(create_access_token({"sub": str(vp.id), "role": vp.role, "jti": str(uuid.uuid4())}))
+    assert client.get(f"/assessments/{exam.id}/questions", headers=vp_headers).status_code == 403

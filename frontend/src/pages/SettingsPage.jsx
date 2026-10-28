@@ -45,7 +45,8 @@ export default function SettingsPage() {
     }
   };
 
-  const roleLabel = { student: "Student", instructor: "Faculty / Instructor", admin: "Administrator" };
+  const roleLabel = { student: "Student", instructor: "Faculty / Instructor", admin: "Administrator",
+    program_director: "Program Director", dean: "Dean", vp_academic_affairs: "VP for Academic Affairs" };
 
   return (
     <Layout>

@@ -69,5 +69,15 @@ def delete_section(
     section = db.query(Section).filter(Section.id == section_id).first()
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
+    # Deleting would orphan enrollments (NOT NULL FK -> 500) or silently unlink courses.
+    from backend.models.course import Course
+    n_students = len(section.enrollments)
+    n_courses = db.query(Course).filter(Course.section_id == section.id).count()
+    if n_students or n_courses:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Section {section.section_name} still has {n_students} enrolled student(s) and "
+                    f"{n_courses} course(s). Remove those enrollments and move the courses first."),
+        )
     db.delete(section)
     db.commit()

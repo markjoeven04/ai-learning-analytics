@@ -300,13 +300,13 @@ export default function StudentDashboard() {
         {courseId && (
           <>
             {/* ── Stat Cards ── */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {loadingScores ? (
-                [...Array(4)].map((_, i) => <SkeletonCard key={i} />)
+                [...Array(3)].map((_, i) => <SkeletonCard key={i} />)
               ) : (
                 <>
                   <StatCard
-                    label="Overall GPA"
+                    label="Average Score"
                     value={avgScore !== null ? `${avgScore}%` : "—"}
                     color="indigo"
                     sub={avgScore !== null ? (avgScore >= T.mastery_threshold ? "Passing" : "Below passing") : "No data"}
@@ -322,12 +322,6 @@ export default function StudentDashboard() {
                     value={scores ? weakCount : "—"}
                     color={weakCount > 0 ? "red" : "green"}
                     sub={`below ${T.mastery_threshold}% threshold`}
-                  />
-                  <StatCard
-                    label="Pending Assignments"
-                    value="—"
-                    color="amber"
-                    sub="feature coming soon"
                   />
                 </>
               )}

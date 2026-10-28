@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
+from backend.core.access import assert_course_read_access
 from backend.core.audit import log_action
 from backend.core.database import get_db
 from backend.core.deps import require_role
@@ -107,9 +108,21 @@ def _check_choices(question_type: str, choices):
         raise HTTPException(status_code=422, detail="Multiple-choice questions need at least 2 choices")
 
 
+# Per BTECH policy only the PD and Dean may read an exam (never change it).
+_REVIEWERS = (UserRole.program_director, UserRole.dean)
+
+
 @router.get("/assessments/{assessment_id}/questions")
-def list_questions(assessment_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(_instructor)):
-    _load_assessment(assessment_id, db, current_user)
+def list_questions(assessment_id: uuid.UUID, db: Session = Depends(get_db),
+                   current_user: User = Depends(require_role(UserRole.instructor, UserRole.admin, *_REVIEWERS))):
+    if current_user.role in _REVIEWERS:
+        # Read-only: the approver must see the questions they are signing off.
+        assessment = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+        if not assessment:
+            raise HTTPException(status_code=404, detail="Assessment not found")
+        assert_course_read_access(assessment.course.instructor_id, current_user, db)
+    else:
+        _load_assessment(assessment_id, db, current_user)
     return _listing(assessment_id, db)
 
 

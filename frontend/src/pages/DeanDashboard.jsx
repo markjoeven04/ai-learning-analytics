@@ -349,7 +349,7 @@ export default function DeanDashboard() {
                     <div key={s.course_id} className="px-2 py-1 -mx-2 rounded-lg hover:bg-gray-50 transition-colors">
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="min-w-0 flex-1">
-                          <span className="text-xs font-mono text-indigo-600 mr-1.5">{s.course_code}</span>
+                          <span className="text-xs font-mono text-indigo-600 mr-1.5 whitespace-nowrap">{s.course_code}</span>
                           <span className="text-xs text-gray-700 truncate">{s.course_title}</span>
                         </div>
                         <div className="text-right ml-3 shrink-0">

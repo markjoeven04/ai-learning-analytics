@@ -30,6 +30,7 @@ class SyllabusApprovalResponse(BaseModel):
     id: UUID
     syllabus_id: UUID
     approver_id: UUID
+    approver_name: Optional[str] = None
     role: str
     status: str
     feedback: Optional[str]
@@ -59,6 +60,14 @@ class SyllabusResponse(BaseModel):
     @property
     def llm_structured_output(self) -> Any:
         return self.parsed_json
+
+
+class PendingSyllabusResponse(SyllabusResponse):
+    """An approval-queue item: the syllabus plus what an approver needs to recognise it."""
+    course_title: Optional[str] = None
+    course_code: Optional[str] = None
+    course_academic_period: Optional[str] = None
+    instructor_name: Optional[str] = None
 
 
 class SyllabusWithCourseResponse(BaseModel):

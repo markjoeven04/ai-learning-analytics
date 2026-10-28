@@ -50,6 +50,14 @@ class AssessmentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AssessmentQueueItem(AssessmentResponse):
+    """Pending-approval row: names the course and instructor so the reviewer sees what they approve."""
+    course_code: Optional[str] = None
+    course_title: Optional[str] = None
+    course_academic_period: Optional[str] = None
+    instructor_name: Optional[str] = None
+
+
 class AssessmentApprovalCreate(BaseModel):
     feedback: Optional[str] = None
     content_validity: bool = False

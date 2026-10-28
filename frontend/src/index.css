@@ -1,3 +1,13 @@
+/* Plus Jakarta Sans (SIL Open Font License), served from our own origin so the
+   production CSP (font-src 'self') allows it and the app needs no outside requests. */
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/plus-jakarta-sans-latin.woff2") format("woff2");
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

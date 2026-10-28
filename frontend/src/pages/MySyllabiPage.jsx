@@ -106,9 +106,9 @@ function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
       <ApprovalChain stage={stage} />
 
       <div className="mt-4 flex items-center gap-2 flex-wrap">
-        <button onClick={() => setOpen(o => !o)} aria-expanded={open}
+        <button onClick={() => setOpen(true)}
           className="px-3 py-1.5 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors">
-          {open ? "Hide" : "View syllabus"}
+          View syllabus
         </button>
         {stage === "draft" && (
           <button
@@ -160,7 +160,42 @@ function SyllabusCard({ syllabus, onRefresh, onContinue, loading }) {
           </button>
         )}
       </div>
-      {open && <SyllabusDetails s={syllabus} />}
+      {open && <SyllabusModal syllabus={syllabus} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+// Full syllabus in a modal, so opening one card doesn't stretch the whole grid row.
+function SyllabusModal({ syllabus, onClose }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const stage = syllabus.approval_stage || "draft";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={`Syllabus: ${syllabus.course_title}`}
+        className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+              {syllabus.course_code} &bull; {syllabus.course_academic_period}
+            </p>
+            <h2 className="text-base font-semibold text-gray-800">{syllabus.course_title}</h2>
+          </div>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${STAGE_COLORS[stage] || "bg-gray-100 text-gray-600"}`}>
+            {STAGE_LABELS[stage] || stage}
+          </span>
+        </div>
+        <div className="px-6 pb-4 overflow-y-auto">
+          <SyllabusDetails s={syllabus} />
+        </div>
+        <div className="px-6 py-3 border-t border-gray-100 flex justify-end">
+          <button onClick={onClose} autoFocus
+            className="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
+        </div>
+      </div>
     </div>
   );
 }
