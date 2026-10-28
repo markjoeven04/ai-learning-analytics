@@ -1,0 +1,41 @@
+student_id,question_text,score,max_score,submission_date
+2024-0002,What is the Big-O time complexity of accessing an element in an array by index?,5,5,2026-10-27
+2024-0002,"Compare O(n log n) and O(n^2) growth for an input of 1,000 elements.",9,10,2026-10-27
+2024-0002,Determine the time complexity of a nested loop that iterates n times inside another n-iteration loop.,5,5,2026-10-27
+2024-0002,Write the steps to insert a node at the head of a singly linked list.,9,10,2026-10-27
+2024-0002,Explain the difference between a singly linked list and a doubly linked list.,5,5,2026-10-27
+2024-0002,Trace the deletion of the last node in a circular linked list.,9,10,2026-10-27
+2024-0002,"Push 5, 8, 3 onto an empty stack and pop twice. What value remains on top?",5,5,2026-10-27
+2024-0002,Evaluate the postfix expression 6 2 3 + * using a stack.,10,10,2026-10-27
+2024-0002,Implement enqueue and dequeue operations for a queue using an array.,9,10,2026-10-27
+2024-0002,Explain why a queue follows FIFO while a stack follows LIFO.,5,5,2026-10-27
+2024-0001,What is the Big-O time complexity of accessing an element in an array by index?,5,5,2026-10-27
+2024-0001,"Compare O(n log n) and O(n^2) growth for an input of 1,000 elements.",8,10,2026-10-27
+2024-0001,Determine the time complexity of a nested loop that iterates n times inside another n-iteration loop.,4,5,2026-10-27
+2024-0001,Write the steps to insert a node at the head of a singly linked list.,7,10,2026-10-27
+2024-0001,Explain the difference between a singly linked list and a doubly linked list.,4,5,2026-10-27
+2024-0001,Trace the deletion of the last node in a circular linked list.,7,10,2026-10-27
+2024-0001,"Push 5, 8, 3 onto an empty stack and pop twice. What value remains on top?",4,5,2026-10-27
+2024-0001,Evaluate the postfix expression 6 2 3 + * using a stack.,8,10,2026-10-27
+2024-0001,Implement enqueue and dequeue operations for a queue using an array.,7,10,2026-10-27
+2024-0001,Explain why a queue follows FIFO while a stack follows LIFO.,4,5,2026-10-27
+2024-0003,What is the Big-O time complexity of accessing an element in an array by index?,3,5,2026-10-27
+2024-0003,"Compare O(n log n) and O(n^2) growth for an input of 1,000 elements.",5,10,2026-10-27
+2024-0003,Determine the time complexity of a nested loop that iterates n times inside another n-iteration loop.,2,5,2026-10-27
+2024-0003,Write the steps to insert a node at the head of a singly linked list.,5,10,2026-10-27
+2024-0003,Explain the difference between a singly linked list and a doubly linked list.,3,5,2026-10-27
+2024-0003,Trace the deletion of the last node in a circular linked list.,4,10,2026-10-27
+2024-0003,"Push 5, 8, 3 onto an empty stack and pop twice. What value remains on top?",3,5,2026-10-27
+2024-0003,Evaluate the postfix expression 6 2 3 + * using a stack.,5,10,2026-10-27
+2024-0003,Implement enqueue and dequeue operations for a queue using an array.,4,10,2026-10-27
+2024-0003,Explain why a queue follows FIFO while a stack follows LIFO.,3,5,2026-10-27
+2024-0004,What is the Big-O time complexity of accessing an element in an array by index?,4,5,2026-10-27
+2024-0004,"Compare O(n log n) and O(n^2) growth for an input of 1,000 elements.",7,10,2026-10-27
+2024-0004,Determine the time complexity of a nested loop that iterates n times inside another n-iteration loop.,3,5,2026-10-27
+2024-0004,Write the steps to insert a node at the head of a singly linked list.,8,10,2026-10-27
+2024-0004,Explain the difference between a singly linked list and a doubly linked list.,4,5,2026-10-27
+2024-0004,Trace the deletion of the last node in a circular linked list.,7,10,2026-10-27
+2024-0004,"Push 5, 8, 3 onto an empty stack and pop twice. What value remains on top?",4,5,2026-10-27
+2024-0004,Evaluate the postfix expression 6 2 3 + * using a stack.,6,10,2026-10-27
+2024-0004,Implement enqueue and dequeue operations for a queue using an array.,7,10,2026-10-27
+2024-0004,Explain why a queue follows FIFO while a stack follows LIFO.,4,5,2026-10-27

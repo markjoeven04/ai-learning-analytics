@@ -428,6 +428,10 @@ def upsert_tos_entry(
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
     _assert_course_access(assessment.course, current_user)
+    comp = db.query(Competency).join(Competency.syllabus).filter(
+        Competency.id == payload.competency_id).first()
+    if comp is None or str(comp.syllabus.course_id) != str(assessment.course_id):
+        raise HTTPException(status_code=422, detail="Choose a competency from this course's syllabus")
     existing = db.query(TableOfSpecifications).filter(
         TableOfSpecifications.assessment_id == assessment_id,
         TableOfSpecifications.competency_id == str(payload.competency_id),
