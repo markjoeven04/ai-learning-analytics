@@ -22,6 +22,8 @@ def test_every_prompt_formats():
     syllabus = build_syllabus_prompt("CLO1 Analyze algorithms")
     assert '"course_title": "string"' in syllabus
     assert "CLO1 Analyze algorithms" in syllabus
+    # a syllabus with both CLOs and a graded DSA-xx topic list must yield the topic list
+    assert "extract the competency/topic list, not the CLOs" in syllabus
 
     mapping = build_mapping_prompt("What is O(log n)?", COMPS)
     assert "What is O(log n)?" in mapping

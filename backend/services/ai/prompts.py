@@ -46,7 +46,7 @@ Return ONLY valid JSON in this exact format:
   "course_title": "string",
   "competencies": [
     {{
-      "competency_code": "string (e.g. CLO1, CO-01, or auto-generate if missing)",
+      "competency_code": "string (the code exactly as written, e.g. DSA-01, CO-01, CLO1; auto-generate only if missing)",
       "topic_name": "string",
       "learning_outcomes": ["string", "string"],
       "bloom_level": "string (one of: Remembering, Understanding, Applying, Analyzing, Evaluating, Creating, or null if unclear)"
@@ -56,7 +56,8 @@ Return ONLY valid JSON in this exact format:
 
 Rules:
 - Each competency must have a unique code
-- Extract every distinct topic or learning outcome
+- If the syllabus has a coded list of competencies or topics (the units students are assessed and graded on, e.g. DSA-01 ... DSA-12) in addition to broader course learning outcomes (CLO1, CLO2 ...), extract the competency/topic list, not the CLOs. Keep their codes exactly as written and use each one's own learning outcome text
+- Otherwise extract every distinct topic or learning outcome
 - If no explicit competency codes exist, generate them as CLO1, CLO2, etc.
 - learning_outcomes is a list of strings describing what students should be able to do
 - bloom_level: infer the primary Bloom's Taxonomy level from the learning outcomes' action verbs (e.g. "define/list" -> Remembering, "explain/describe" -> Understanding, "use/solve" -> Applying, "compare/differentiate" -> Analyzing, "evaluate/judge" -> Evaluating, "design/create" -> Creating)
