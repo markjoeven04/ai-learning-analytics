@@ -156,3 +156,32 @@ def test_second_copy_of_same_course_cannot_enter_review(client, db, instructor_t
     # Re-submitting the same syllabus (double click) is also refused
     r = client.post(f"/syllabi/{syllabus.id}/submit-for-review", headers=_auth(instructor_token))
     assert r.status_code == 400
+
+
+def test_approver_can_open_original_file(client, db, syllabus):
+    import os
+    from backend.routers.syllabi import UPLOAD_DIR
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    path = os.path.join(UPLOAD_DIR, f"{syllabus.course_id}_DSA.pdf")
+    with open(path, "wb") as f:
+        f.write(b"%PDF-1.4 test")
+    try:
+        syllabus.file_path = path
+        db.commit()
+        pd = _approver(db, UserRole.program_director, "pd.file@test.com")
+        r = client.get(f"/syllabi/{syllabus.id}/file", headers=_auth(pd))
+        assert r.status_code == 200 and r.content == b"%PDF-1.4 test"
+        assert 'filename="DSA.pdf"' in r.headers["content-disposition"]
+
+        other = User(email="pd.cba@test.com", password_hash=hash_password("Approver@1234"), full_name="CBA",
+                     role=UserRole.program_director, is_active=True, college="CBA")
+        db.add(other)
+        db.commit()
+        tok = create_access_token({"sub": str(other.id), "role": other.role, "jti": str(uuid.uuid4())})
+        assert client.get(f"/syllabi/{syllabus.id}/file", headers=_auth(tok)).status_code == 403
+
+        syllabus.file_path = "/etc/hosts"   # never serve files outside the upload folder
+        db.commit()
+        assert client.get(f"/syllabi/{syllabus.id}/file", headers=_auth(pd)).status_code == 404
+    finally:
+        os.remove(path)

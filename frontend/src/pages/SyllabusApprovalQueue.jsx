@@ -92,7 +92,51 @@ function AlignmentCheck({ syllabusId }) {
   );
 }
 
+// Read-only view of what the approver is signing off: competencies, outcomes and the source file.
+function SyllabusDetails({ s }) {
+  const [fileError, setFileError] = useState(null);
+  const openFile = async () => {
+    setFileError(null);
+    try {
+      const res = await api.get(`/syllabi/${s.id}/file`, { responseType: "blob" });
+      const href = URL.createObjectURL(res.data);
+      window.open(href, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(href), 60000);
+    } catch {
+      setFileError("The original file is not available.");
+    }
+  };
+  return (
+    <div className="mt-4 border-t border-gray-100 pt-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Competencies</p>
+        <button onClick={openFile} className="text-xs text-indigo-600 hover:underline">Open original syllabus file ↗</button>
+      </div>
+      {fileError && <p className="text-xs text-red-600">{fileError}</p>}
+      {(s.competencies || []).length === 0 ? (
+        <p className="text-xs text-gray-400">No competencies extracted.</p>
+      ) : (
+        <ol className="space-y-2">
+          {[...s.competencies].sort((a, b) => a.competency_code.localeCompare(b.competency_code)).map(c => (
+            <li key={c.id} className="text-sm">
+              <span className="font-mono text-xs text-indigo-600 mr-2">{c.competency_code}</span>
+              <span className="text-gray-800">{c.topic_name}</span>
+              {c.learning_outcomes?.length > 0 && (
+                <ul className="mt-0.5 ml-6 list-disc text-xs text-gray-500 space-y-0.5">
+                  {c.learning_outcomes.map((o, i) => <li key={i}>{o}</li>)}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      <AlignmentCheck syllabusId={s.id} />
+    </div>
+  );
+}
+
 function SyllabusCard({ s, acting, verb, onApprove, onReject, onHistory }) {
+  const [open, setOpen] = useState(false);
   const compCount = s.competencies?.length ?? 0;
   const courseSnippet = s.course_id ? s.course_id.slice(0, 8) + "…" : "—";
 
@@ -119,6 +163,10 @@ function SyllabusCard({ s, acting, verb, onApprove, onReject, onHistory }) {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setOpen(o => !o)} aria-expanded={open}
+            className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors">
+            {open ? "Hide" : "View"}
+          </button>
           <button onClick={() => onHistory(s.id)}
             className="text-xs text-gray-500 hover:text-indigo-600 border border-gray-200 px-2.5 py-1.5 rounded-lg transition-colors">
             History
@@ -135,6 +183,7 @@ function SyllabusCard({ s, acting, verb, onApprove, onReject, onHistory }) {
           </button>
         </div>
       </div>
+      {open && <SyllabusDetails s={s} />}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -363,6 +364,26 @@ def get_syllabus_alignment(
     elif current_user.role != UserRole.vp_academic_affairs:
         raise HTTPException(status_code=403, detail="Not allowed")
     return syllabus_alignment(syllabus, db)
+
+
+@router.get("/{syllabus_id}/file")
+def get_syllabus_file(
+    syllabus_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The uploaded syllabus document, so approvers can check the AI extraction against it."""
+    syllabus = db.query(Syllabus).filter(Syllabus.id == syllabus_id).first()
+    if not syllabus:
+        raise HTTPException(status_code=404, detail="Syllabus not found")
+    course = db.query(Course).filter(Course.id == syllabus.course_id).first()
+    if course:
+        assert_course_read_access(course.instructor_id, current_user, db)
+    path = os.path.realpath(syllabus.file_path or "")
+    if not path.startswith(os.path.realpath(UPLOAD_DIR) + os.sep) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="The original file is not available")
+    name = os.path.basename(path).split("_", 1)[-1]
+    return FileResponse(path, filename=name)
 
 
 @router.get("/{syllabus_id}/approval-history", response_model=list[SyllabusApprovalResponse])
